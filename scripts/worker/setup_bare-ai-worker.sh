@@ -125,6 +125,15 @@ execute_command "chmod +x \"$DEST_BIN\"" "Make bare-summarize executable"
 if [ "$ENGINE_CHOICE" == "1" ]; then
     echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
 
+    # Ensure npm is available before attempting build
+    if ! command -v npm &>/dev/null; then
+        echo -e "${YELLOW}npm not found. Installing Node.js and npm...${NC}"
+        execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq nodejs npm" "Install Node.js and npm"
+        echo -e "${GREEN}✓ Node.js and npm installed${NC}"
+    else
+        echo -e "${GREEN}✓ npm already installed${NC}"
+    fi
+
     if [ ! -d "$CLI_REPO_DIR" ]; then
         echo -e "${YELLOW}CLI not found. Cloning sovereign engine from GitHub...${NC}"
         execute_command "git clone https://github.com/Cian-CloudIntCorp/bare-ai-cli.git \"$CLI_REPO_DIR\"" "Clone Bare-AI-CLI"
