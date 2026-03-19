@@ -1,0 +1,5 @@
+scripts/worker/setup_bare-ai-worker.sh text eol=lf
+scripts/dev/setup_bare-ai-dev.sh text eol=lf
+scripts/brain/setup_bare-brain.sh text eol=lf
+scripts/worker/bare-summarize text eol=lf
+scripts/brain/bare-brain-compiled text eol=lf
