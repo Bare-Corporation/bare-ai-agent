@@ -15,7 +15,8 @@
 # DESCRIPTION:    bare-ai-worker "Apex" Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
 # DATE:           2026-02-01
-# VERSION:        5.1.0-Enterprise (Hybrid Engine Choice + Full Autonomy)
+# VERSION:        5.1.1-Enterprise (Hybrid Engine Choice + Full Autonomy 
+#                 + Hashi Corp Vault pre-flight check to all three install scripts)
 # ==============================================================================
 set -euo pipefail
 
@@ -98,6 +99,40 @@ if [ ! -d "$BARE_AI_DIR" ] || [ ! -d "$DIARY_DIR" ] || [ ! -d "$LOG_DIR" ] || [ 
     exit 1
 fi
 echo -e "${GREEN}✓ Directory structure created${NC}"
+
+
+# --- VAULT PRE-FLIGHT CHECK ---
+echo -e "${YELLOW}Checking Vault configuration...${NC}"
+VAULT_ENV_FILE="$HOME/.bare-ai/config/vault.env"
+mkdir -p "$(dirname "$VAULT_ENV_FILE")"
+
+# Create vault.env stub if it doesn't exist
+if [ ! -f "$VAULT_ENV_FILE" ]; then
+    cat << 'VAULT_STUB_EOF' > "$VAULT_ENV_FILE"
+# Bare-AI Vault Credentials
+# Fill in your Vault details and re-run the installer
+VAULT_ADDR=https://your-vault-address:8200
+VAULT_ROLE_ID=your-role-id-here
+VAULT_SECRET_ID=your-secret-id-here
+VAULT_STUB_EOF
+    echo -e "${YELLOW}⚠️  Vault credentials file created at $VAULT_ENV_FILE${NC}"
+    echo -e "${YELLOW}   Please fill in your Vault details before running 'bare'.${NC}"
+else
+    echo -e "${GREEN}✓ Vault credentials file exists${NC}"
+fi
+
+# Source vault.env and test connectivity if VAULT_ADDR is set and not a placeholder
+source "$VAULT_ENV_FILE" 2>/dev/null || true
+if [ -n "${VAULT_ADDR:-}" ] && [ "$VAULT_ADDR" != "https://your-vault-address:8200" ]; then
+    if curl -s -k --max-time 5 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Vault reachable at $VAULT_ADDR${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Vault not reachable at $VAULT_ADDR${NC}"
+        echo -e "${YELLOW}   The agent will install but 'bare' will fail until Vault is accessible.${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️  Vault address not configured — edit $VAULT_ENV_FILE before running 'bare'.${NC}"
+fi
 
 # --- 2. ARTIFACT INSTALLATION ---
 ARTIFACT_NAME="bare-summarize"
@@ -201,6 +236,8 @@ TECH_CONST_DEST="$BARE_AI_DIR/technical-constitution.md"
 
 if [ -f "$TECH_CONST_SRC" ]; then
     # Always overwrite technical constitution — it is managed by the repo
+    # Unlock first in case a previous install set it read-only
+    chmod 644 "$TECH_CONST_DEST" 2>/dev/null || true
     cp "$TECH_CONST_SRC" "$TECH_CONST_DEST"
     chmod 444 "$TECH_CONST_DEST"
     echo -e "${GREEN}✓ Technical constitution deployed (read-only)${NC}"
@@ -294,6 +331,11 @@ bare() {
     local ROLE_CONST="$HOME/.bare-ai/role.md"
     local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
     local CONFIG="$HOME/.bare-ai/config"
+    # Load Vault credentials if not already set
+    if [ -f "$HOME/.bare-ai/config/vault.env" ]; then
+        source "$HOME/.bare-ai/config/vault.env" 2>/dev/null || true
+    fi
+
 
     mkdir -p "$(dirname "$DIARY")"
     touch "$DIARY"
