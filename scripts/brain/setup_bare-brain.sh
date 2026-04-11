@@ -43,12 +43,16 @@ if ! command -v jq &>/dev/null; then
     sudo apt-get update -qq && sudo apt-get install -y -qq jq
 fi
 
-if ! command -v npm &>/dev/null; then
-    echo -e "${YELLOW}Installing npm and Gemini CLI...${NC}"
-    sudo apt-get update -qq && sudo apt-get install -y -qq npm
-    sudo npm install -g @google/gemini-cli
+NPM_MAJOR=$(npm --version 2>/dev/null | cut -d. -f1)
+if [ "${NPM_MAJOR:-0}" -lt 10 ]; then
+    echo -e "${YELLOW}npm version too old ($(npm --version)). Upgrading via n...${NC}"
+    execute_command "sudo npm install -g n" "Install n (node version manager)"
+    execute_command "sudo n stable" "Upgrade Node.js to stable"
+    hash -r 2>/dev/null || true
+    echo -e "${GREEN}✓ Node.js and npm upgraded (npm $(npm --version))${NC}"
+else
+    echo -e "${GREEN}✓ npm $(npm --version) - OK${NC}"
 fi
-
 
 # --- VAULT PRE-FLIGHT CHECK ---
 echo -e "${YELLOW}Checking Vault configuration...${NC}"
@@ -60,9 +64,9 @@ if [ ! -f "$VAULT_ENV_FILE" ]; then
     cat << 'VAULT_STUB_EOF' > "$VAULT_ENV_FILE"
 # Bare-AI Vault Credentials
 # Fill in your Vault details and re-run the installer
-VAULT_ADDR=https://your-vault-address:8200
-VAULT_ROLE_ID=your-role-id-here
-VAULT_SECRET_ID=your-secret-id-here
+export VAULT_ADDR=https://your-vault-address:8200
+export VAULT_ROLE_ID=your-role-id-here
+export VAULT_SECRET_ID=your-secret-id-here
 VAULT_STUB_EOF
     echo -e "${YELLOW}⚠️  Vault credentials file created at $VAULT_ENV_FILE${NC}"
     echo -e "${YELLOW}   Please fill in your Vault details before running 'bare'.${NC}"

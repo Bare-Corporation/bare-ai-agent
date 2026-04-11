@@ -60,9 +60,9 @@ if [ ! -f "$VAULT_ENV_FILE" ]; then
     cat << 'VAULT_STUB_EOF' > "$VAULT_ENV_FILE"
 # Bare-AI Vault Credentials
 # Fill in your Vault details and re-run the installer
-VAULT_ADDR=https://your-vault-address:8200
-VAULT_ROLE_ID=your-role-id-here
-VAULT_SECRET_ID=your-secret-id-here
+export VAULT_ADDR=https://your-vault-address:8200
+export VAULT_ROLE_ID=your-role-id-here
+export VAULT_SECRET_ID=your-secret-id-here
 VAULT_STUB_EOF
     echo -e "${YELLOW}⚠️  Vault credentials file created at $VAULT_ENV_FILE${NC}"
     echo -e "${YELLOW}   Please fill in your Vault details before running 'bare'.${NC}"
