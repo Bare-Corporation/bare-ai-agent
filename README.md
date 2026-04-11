@@ -1,8 +1,9 @@
-# 🦾 Bare-AI-Agent: Autonomous Infrastructure Management
+# 🦾 Bare-AI-Agent: Autonomous Infrastructure Management (The Sovereign Mesh)
+bare-ai-agent is the autonomous "Hands" of the Bare-AI ecosystem. It is designed to be installed on any Linux VM, container, or physical machine to provide agentic capabilities, while calling upon a centralized "Brain" for intelligence.
 
-**Version:** 5.1.0-Enterprise (Hybrid Architect Edition)  
+**Version:** 5.1.2- Enterprise (Hybrid Architect Edition)  
 **Author:** Cian Egan  
-**Date:** 2026-03-16  
+**Date:** 2026-04-11 
 **Repository:** [github.com/Cian-CloudIntCorp/bare-ai-agent](https://github.com/Cian-CloudIntCorp/bare-ai-agent)
 
 Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data pipelines and infrastructure integrity across Linux and Windows environments. The system supports **dual AI engines** — choose between the sovereign Bare-AI-CLI or Google's Gemini-CLI.
@@ -10,6 +11,15 @@ Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data
 ---
 
 ## 🏛️ System Architecture
+This project is designed to mimic the cloud AI experience (like Chat GPT or Google Gemini etc) but entirely on your own hardware:
+
+The AI model(s): 1 centralized High-Performance VM or PC running an LLM (e.g., Ollama/vLLM with Granite 4).
+
+The Brain: Optional but used to manage many agents, kubernetes for ai, (note purely expieremental) 
+
+The Worker Hands: Unlimited lightweight VMs running bare-ai-agent and bare-ai-cli.
+
+The Memory: A centralized HashiCorp Vault server to manage endpoints and keys securely across the fleet.
 
 The fleet follows a strict role-based hierarchy to ensure safety and scalability:
 
@@ -236,6 +246,27 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | jq | JSON processor | Required for `bare-status` |
 
 ---
+🔐 Refined Vault Section (Copy/Paste this fix)Replace the text from your "Vault Configuration" section with this formatted version:Markdown---
+
+## 🔐 Vault Configuration (Mandatory)
+
+The agent remains "Sovereign" by fetching its own connection details from your centralized Vault server. 
+
+1. Configure the Agent's Vault Access
+After installation, edit your local credentials to allow the agent to talk to your Vault server:
+`nano ~/.bare-ai/config/vault.env`
+
+The installer generates this file with `export` keywords. Simply fill in your details:
+```bash
+export VAULT_ADDR=https://<YOUR_VAULT_IP>:8200
+export VAULT_ROLE_ID=<YOUR_APPROLE_ID>
+export VAULT_SECRET_ID=<YOUR_SECRET_ID>
+```
+
+2. Configure the Secret Path in VaultThe agent fetches its intelligence endpoint from a secret path (default: secret/data/granite/config).Required Keys in your Vault Secret:KeyValue ExampleDescriptionBARE_AI_ENDPOINThttp://192.168.86.130:11434/v1/chat/completionsThe LAN IP of your Inference Server.BARE_AI_MODELgranite4:3bThe specific model name running on the Brain.
+
+## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
+Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
 
 ## 🆕 What's New in v5.1.0
 
