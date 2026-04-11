@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-
-############################################################
-#    ____ _                  _ _       _        ____       #
-#   / ___| | ___  _    _  ___| (_)_ __ | |_      / ___|___  #
+#############################################################
+#    ____ _                  _ _       _        ____        #
+#   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
 #  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
 #   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
 #                                                           #
-#  Hybrid Bare-AI-Agent Installer                           #
+#  Hybrid Bare-AI-Agent Worker Installer                    #
 #  by the Cloud Integration Corporation                     #
-############################################################
+#############################################################
 # ==============================================================================
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker "Apex" Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
 # DATE:           2026-02-01
-# VERSION:        5.1.1-Enterprise (Hybrid Engine Choice + Full Autonomy 
-#                 + Hashi Corp Vault pre-flight check to all three install scripts)
+# VERSION:        5.1.2-Enterprise (Fixed Config Directory Conflict)
 # ==============================================================================
 set -euo pipefail
 
@@ -45,7 +43,7 @@ BARE_AI_DIR="$WORKSPACE_DIR"
 BIN_DIR="$BARE_AI_DIR/bin"
 LOG_DIR="$BARE_AI_DIR/logs"
 DIARY_DIR="$BARE_AI_DIR/diary"
-CONFIG_FILE="$BARE_AI_DIR/config"
+CONFIG_FILE="$BARE_AI_DIR/config/agent.env" # <--- FIXED: Now points to a file inside the config dir
 CLI_REPO_DIR="$HOME/bare-ai-cli"
 
 # --- SOURCE DIR DETECTION (Path Paradox Fix) ---
@@ -111,9 +109,9 @@ if [ ! -f "$VAULT_ENV_FILE" ]; then
     cat << 'VAULT_STUB_EOF' > "$VAULT_ENV_FILE"
 # Bare-AI Vault Credentials
 # Fill in your Vault details and re-run the installer
-VAULT_ADDR=https://your-vault-address:8200
-VAULT_ROLE_ID=your-role-id-here
-VAULT_SECRET_ID=your-secret-id-here
+export VAULT_ADDR=https://your-vault-address:8200
+export VAULT_ROLE_ID=your-role-id-here
+export VAULT_SECRET_ID=your-secret-id-here
 VAULT_STUB_EOF
     echo -e "${YELLOW}⚠️  Vault credentials file created at $VAULT_ENV_FILE${NC}"
     echo -e "${YELLOW}   Please fill in your Vault details before running 'bare'.${NC}"
@@ -273,11 +271,12 @@ This directory stores the persistent configuration and memory for the BARE-AI ag
 
 ## Directory Structure
 - **technical-constitution.md** — Core Linux tool rules (read-only, managed by bare-ai-agent)
-- **role.md**                  — Agent personality and mission (edit freely, never overwritten)
-- **diary/**                   — Daily activity logs
-- **logs/**                    — JSON telemetry per command execution
-- **bin/**                     — Local artifacts (bare-summarize, etc.)
-- **config**                   — Agent config (AGENT_ID, ENGINE_TYPE)
+- **role.md** — Agent personality and mission (edit freely, never overwritten)
+- **diary/** — Daily activity logs
+- **logs/** — JSON telemetry per command execution
+- **bin/** — Local artifacts (bare-summarize, etc.)
+- **config/agent.env** — Agent config (AGENT_ID, ENGINE_TYPE)
+- **config/vault.env** — Vault credentials 
 
 ## Customising Your Agent
 Edit ~/.bare-ai/role.md to define this agent's personality, mission, and domain rules.
@@ -286,7 +285,7 @@ The technical-constitution.md is managed by the repo — do not edit it directly
 ## Engine Selection
 Two engines are supported:
 - **Bare-AI-CLI** — Sovereign, local-first, Vault-integrated
-- **Gemini-CLI**  — Standard Google Cloud SDK
+- **Gemini-CLI** — Standard Google Cloud SDK
 
 ## Gemini Setup (if using Gemini engine)
 1. Install: `npm install -g @google/gemini-cli`
@@ -330,7 +329,8 @@ bare() {
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
     local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
-    local CONFIG="$HOME/.bare-ai/config"
+    local CONFIG="$HOME/.bare-ai/config/agent.env"
+    
     # Load Vault credentials if not already set
     if [ -f "$HOME/.bare-ai/config/vault.env" ]; then
         source "$HOME/.bare-ai/config/vault.env" 2>/dev/null || true
@@ -407,9 +407,9 @@ fi
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI WORKER SETUP COMPLETE${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "1. ${YELLOW}Reload:${NC}       source ~/.bashrc"
+echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc"
 echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize"
-echo -e "3. ${YELLOW}Run agent:${NC}    bare granite"
-echo -e "5. ${YELLOW}Edit role:${NC}    bare-role  (customise your agent personality)"
-echo -e "4. ${YELLOW}Engine type:${NC}  $ENGINE_TYPE"
+echo -e "3. ${YELLOW}Run agent:${NC}     bare granite"
+echo -e "5. ${YELLOW}Edit role:${NC}     bare-role  (customise your agent personality)"
+echo -e "4. ${YELLOW}Engine type:${NC}   $ENGINE_TYPE"
 exit 0
