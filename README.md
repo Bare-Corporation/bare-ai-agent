@@ -111,6 +111,7 @@ git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
 
 # 2. Run the worker installer
 cd ~/bare-ai-agent/scripts/worker
+chmod +x setup_bare-ai-worker.sh
 ./setup_bare-ai-worker.sh
 
 # 3. Reload your shell
@@ -134,6 +135,7 @@ git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
 
 # 2. Run the Architect setup
 cd ~/bare-ai-agent/scripts/dev
+chmod +x setup_bare-ai-dev.sh
 ./setup_bare-ai-dev.sh
 
 # 3. Reload your shell
@@ -156,6 +158,7 @@ git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
 
 # 2. Run the Brain installer
 cd ~/bare-ai-agent/scripts/brain
+chmod +x setup_bare-brain.sh
 ./setup_bare-brain.sh
 
 # 3. Reload your shell
