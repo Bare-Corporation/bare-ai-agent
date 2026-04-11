@@ -13,8 +13,8 @@
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker "Apex" Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
-# DATE:           2026-02-01
-# VERSION:        5.1.2-Enterprise (Fixed Config Directory Conflict)
+# DATE:           2026-04-13
+# VERSION:        5.2.0-Enterprise (Dynamic Vault Routing & Gemma4)
 # ==============================================================================
 set -euo pipefail
 
@@ -319,8 +319,14 @@ else
 fi
 
 # 8b. bare() hybrid loader function
-if ! grep -q "BARE-AI Hybrid Loader" "$BASHRC_FILE"; then
-    cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
+# Clean out old BARE-AI Hybrid Loader block to ensure fresh injection
+if grep -q "# BARE-AI Hybrid Loader" "$BASHRC_FILE"; then
+    echo -e "${YELLOW}Removing legacy bare() function to apply updates...${NC}"
+    # Use sed to delete everything between the marker and the alias block
+    sed -i '/# BARE-AI Hybrid Loader/,/^alias bare-constitution/d' "$BASHRC_FILE"
+fi
+
+cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
 
 # BARE-AI Hybrid Loader
 bare() {
@@ -359,7 +365,9 @@ bare() {
     case "$MODEL" in
         energy)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
         loco)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        granite) export VAULT_SECRET_PATH="secret/data/granite/config";         export BARE_AI_NO_TOOLS="false" ;;
+        granite) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
+        gemma4)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
+        *)       export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
     esac
 
     export BARE_AI_CONSTITUTION="$TECH_CONST"
