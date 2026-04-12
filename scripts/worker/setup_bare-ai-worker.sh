@@ -335,7 +335,6 @@ bare() {
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
     local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
-    local CONFIG="$HOME/.bare-ai/config/agent.env"
     
     # Load Vault credentials if not already set
     if [ -f "$HOME/.bare-ai/config/vault.env" ]; then
@@ -407,9 +406,6 @@ alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
 BARE_FUNC_EOF
     echo -e "${GREEN}✓ bare() function added to .bashrc${NC}"
-else
-    echo -e "${YELLOW}⚠️  bare() already in .bashrc, skipping${NC}"
-fi
 
 # --- COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
