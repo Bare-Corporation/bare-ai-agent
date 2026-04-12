@@ -1,4 +1,4 @@
-you verify please; #!/usr/bin/env bash
+#!/usr/bin/env bash
 #############################################################
 #    ____ _                  _ _       _        ____        #
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
@@ -14,6 +14,7 @@ you verify please; #!/usr/bin/env bash
 # DESCRIPTION:    bare-ai-worker "Apex" Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
 # DATE:           2026-04-13
+# UPDATED:        2026-02-02
 # VERSION:        5.2.0-Enterprise (Dynamic Vault Routing & Gemma4)
 # ==============================================================================
 set -euo pipefail
@@ -88,6 +89,10 @@ execute_command() {
     echo -e "${GREEN}✓ Done${NC}"
 }
 
+#####################################################
+#####################################################
+#####################################################
+
 # --- 1. DIRECTORY SETUP ---
 echo -e "${YELLOW}Creating BARE-AI directory structure...${NC}"
 execute_command "mkdir -p \"$DIARY_DIR\" \"$LOG_DIR\" \"$BIN_DIR\"" "Create diary, logs, and bin directories"
@@ -98,39 +103,60 @@ if [ ! -d "$BARE_AI_DIR" ] || [ ! -d "$DIARY_DIR" ] || [ ! -d "$LOG_DIR" ] || [ 
 fi
 echo -e "${GREEN}✓ Directory structure created${NC}"
 
+#####################################################
+#####################################################
+#####################################################
 
 # --- VAULT PRE-FLIGHT CHECK ---
-echo -e "${YELLOW}Checking Vault configuration...${NC}"
+# --- 1b. VAULT PRE-FLIGHT & INSTALLATION ---
+echo -e "\n${YELLOW}Checking Vault configuration...${NC}"
 VAULT_ENV_FILE="$HOME/.bare-ai/config/vault.env"
 mkdir -p "$(dirname "$VAULT_ENV_FILE")"
 
-# Create vault.env stub if it doesn't exist
-if [ ! -f "$VAULT_ENV_FILE" ]; then
-    cat << 'VAULT_STUB_EOF' > "$VAULT_ENV_FILE"
-# Bare-AI Vault Credentials
-# Fill in your Vault details and re-run the installer
-export VAULT_ADDR=https://your-vault-address:8200
-export VAULT_ROLE_ID=your-role-id-here
-export VAULT_SECRET_ID=your-secret-id-here
-VAULT_STUB_EOF
-    echo -e "${YELLOW}⚠️  Vault credentials file created at $VAULT_ENV_FILE${NC}"
-    echo -e "${YELLOW}   Please fill in your Vault details before running 'bare'.${NC}"
+FINAL_VAULT_ADDR="http://127.0.0.1:8200"
+INSTALL_VAULT=false
+
+read -rp "Do you have an existing HashiCorp Vault server for this agent? [y/N/unsure]: " HAS_VAULT
+if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
+    read -rp "Enter Vault Address (e.g., https://192.168.1.50:8200): " USER_VAULT_ADDR
+    echo -e "Testing connectivity to $USER_VAULT_ADDR..."
+    if curl -s -k --max-time 5 "$USER_VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 || curl -s -k --max-time 5 "$USER_VAULT_ADDR" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Vault reachable!${NC}"
+        FINAL_VAULT_ADDR="$USER_VAULT_ADDR"
+    else
+        echo -e "${RED}❌ Cannot reach $USER_VAULT_ADDR. Falling back to local Vault installation.${NC}"
+        INSTALL_VAULT=true
+    fi
 else
-    echo -e "${GREEN}✓ Vault credentials file exists${NC}"
+    INSTALL_VAULT=true
 fi
 
-# Source vault.env and test connectivity if VAULT_ADDR is set and not a placeholder
-source "$VAULT_ENV_FILE" 2>/dev/null || true
-if [ -n "${VAULT_ADDR:-}" ] && [ "$VAULT_ADDR" != "https://your-vault-address:8200" ]; then
-    if curl -s -k --max-time 5 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Vault reachable at $VAULT_ADDR${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Vault not reachable at $VAULT_ADDR${NC}"
-        echo -e "${YELLOW}   The agent will install but 'bare' will fail until Vault is accessible.${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠️  Vault address not configured — edit $VAULT_ENV_FILE before running 'bare'.${NC}"
+# Auto-Install Logic for Local Vault
+if [ "$INSTALL_VAULT" = true ]; then
+    if command -v vault &>/dev/null; then
+        echo -e "${GREEN}✓ Vault binary already installed locally.${NC}"
+    else
+        echo -e "${YELLOW}Installing HashiCorp Vault locally...${NC}"
+        execute_command "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg" "Add HashiCorp GPG key"
+        execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com \$(lsb_release -cs) main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list" "Add HashiCorp Repo"
+        execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault" "Install Vault package"
+        echo -e "${YELLOW}⚠️ Local Vault installed! You MUST run 'vault server -dev' or initialize it for production later.${NC}"
+    fi
+    FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 fi
+
+# Write dynamic vault.env
+cat << EOF > "$VAULT_ENV_FILE"
+# Bare-AI Vault Credentials
+export VAULT_ADDR="$FINAL_VAULT_ADDR"
+export VAULT_ROLE_ID=your-role-id-here
+export VAULT_SECRET_ID=your-secret-id-here
+EOF
+echo -e "${GREEN}✓ Vault config saved pointing to $FINAL_VAULT_ADDR${NC}"
+
+#####################################################
+#####################################################
+#####################################################
 
 # --- 2. ARTIFACT INSTALLATION ---
 ARTIFACT_NAME="bare-summarize"
@@ -156,6 +182,42 @@ STUB
 fi
 
 execute_command "chmod +x \"$DEST_BIN\"" "Make bare-summarize executable"
+
+#####################################################
+#####################################################
+#####################################################
+
+# --- 2b. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
+echo -e "${YELLOW}Deploying bare-necessities toolset...${NC}"
+BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
+
+if [ -d "$BARE_NECESSITIES_DIR" ]; then
+    echo -e "${YELLOW}Setting executable permissions...${NC}"
+    # Find all .sh and .py files in the toolkit and make them executable
+    execute_command "find \"$BARE_NECESSITIES_DIR\" -type f -name \"*.sh\" -o -name \"*.py\" -exec chmod +x {} +" "Make toolkit scripts executable"
+
+    echo -e "${YELLOW}Creating global symlinks in /usr/local/bin...${NC}"
+    
+    # Bash tools
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp" "Symlink cpu-temp"
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check" "Symlink pve-check"
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health" "Symlink disk-health"
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit" "Symlink net-audit"
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log" "Symlink error-log"
+
+    # Python tools
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor" "Symlink ai-monitor"
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map" "Symlink code-map"
+    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json" "Symlink pve-json"
+
+    echo -e "${GREEN}✓ bare-necessities deployed successfully${NC}"
+else
+    echo -e "${YELLOW}⚠️ bare-necessities directory not found at $BARE_NECESSITIES_DIR. Skipping toolkit deployment.${NC}"
+fi
+
+#####################################################
+#####################################################
+#####################################################
 
 # --- 3. ENGINE INSTALLATION ---
 if [ "$ENGINE_CHOICE" == "1" ]; then
@@ -215,6 +277,10 @@ else
     ENGINE_TYPE="cloud"
 fi
 
+#####################################################
+#####################################################
+#####################################################
+
 # --- 4. AGENT CONFIG ---
 if [ ! -f "$CONFIG_FILE" ]; then
     AGENT_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "BARE-$(date +%s)-${RANDOM}")
@@ -223,6 +289,10 @@ if [ ! -f "$CONFIG_FILE" ]; then
 else
     echo -e "${YELLOW}⚠️  Config already exists, skipping ID generation${NC}"
 fi
+
+#####################################################
+#####################################################
+#####################################################
 
 # --- 5. CONSTITUTIONS ---
 # technical-constitution.md — base Linux rules, managed by bare-ai-agent, read-only
@@ -262,6 +332,10 @@ else
     echo -e "${GREEN}✓ Role constitution already exists — not overwritten${NC}"
 fi
 
+#####################################################
+#####################################################
+#####################################################
+
 # --- 6. README ---
 echo -e "${YELLOW}Writing README.md...${NC}"
 cat << 'README_EOF' > "$BARE_AI_DIR/README.md"
@@ -293,6 +367,10 @@ Two engines are supported:
 README_EOF
 echo -e "${GREEN}✓ README written${NC}"
 
+#####################################################
+#####################################################
+#####################################################
+
 # --- 7. TELEMETRY PING ---
 # FIX: Use full https:// URL and suppress errors so set -e is not tripped on network issues
 TELEMETRY_URL="https://www.bare-erp.com"
@@ -300,9 +378,17 @@ echo -e "${YELLOW}Pinging telemetry endpoint...${NC}"
 HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$TELEMETRY_URL" || echo "000")
 echo -e "${GREEN}✓ Telemetry ping: HTTP $HTTP_CODE${NC}"
 
+#####################################################
+#####################################################
+#####################################################
+
 # --- 8. BASHRC UPDATES ---
 BASHRC_FILE="$HOME/.bashrc"
 echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
+
+#####################################################
+#####################################################
+#####################################################
 
 # 8a. PATH entry
 if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
@@ -317,6 +403,10 @@ PATH_EOF
 else
     echo -e "${YELLOW}⚠️  PATH entry already present, skipping${NC}"
 fi
+
+#####################################################
+#####################################################
+#####################################################
 
 # 8b. bare() hybrid loader function
 # Clean out old BARE-AI Hybrid Loader block to ensure fresh injection
@@ -335,11 +425,13 @@ bare() {
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
     local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
-    
-    # Load Vault credentials if not already set
-    if [ -f "$HOME/.bare-ai/config/vault.env" ]; then
-        source "$HOME/.bare-ai/config/vault.env" 2>/dev/null || true
-    fi
+    local CONFIG="$HOME/.bare-ai/config/agent.env"
+    local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
+
+    # Load Vault credentials dynamically (This securely sets VAULT_ADDR)
+    if [ -f "$VAULT_ENV" ]; then
+        source "$VAULT_ENV" 2>/dev/null || true
+    fi
 
     mkdir -p "$(dirname "$DIARY")"
     touch "$DIARY"
@@ -374,7 +466,7 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
-        cd "$HOME/bare-ai-cli" && node sovereign.js
+        cd "$HOME/bare-ai-cli" && node sovereign.js "$@"
         # Log forwarding
         if [ -f "BARE.md" ]; then
             echo -e "\n--- SESSION APPENDED: $(date) [bare-ai | $MODEL] ---" >> "$DIARY"
@@ -389,7 +481,7 @@ bare() {
         if [ -f "$ROLE_CONST" ]; then
             combined_const="${combined_const}"$'\n\n---\n\n'"$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")"
         fi
-        gemini -m gemini-2.5-flash-lite -i "$combined_const"
+        gemini -m gemini-2.5-flash-lite -i "$combined_const" "$@"
         # Log forwarding
         if [ -f "GEMINI.md" ]; then
             echo -e "\n--- SESSION APPENDED: $(date) [gemini] ---" >> "$DIARY"
@@ -405,6 +497,10 @@ alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
 BARE_FUNC_EOF
     echo -e "${GREEN}✓ bare() function added to .bashrc${NC}"
+
+#####################################################
+#####################################################
+#####################################################
 
 # --- COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
