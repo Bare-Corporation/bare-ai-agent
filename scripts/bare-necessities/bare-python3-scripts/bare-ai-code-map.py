@@ -7,8 +7,9 @@
 #   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
 #                                                           #
 #  Python Structure Extractor (Context Optimizer)           #
-#  by the Cloud Integration Corporation                     #
 #  Version: v1.1.0 | Updated: 2026-04-12                    #
+#############################################################
+#  by the Cloud Integration Corporation                     #
 #############################################################
 
 import ast

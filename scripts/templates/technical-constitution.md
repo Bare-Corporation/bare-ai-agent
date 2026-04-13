@@ -1,3 +1,10 @@
+#    ____ _                  _ _       _         ____       
+#   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   
+#  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ 
+#  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |
+#   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ 
+#                                                           
+
 ## BARE-AI TECHNICAL CONSTITUTION ##
 Managed by bare-ai-agent — DO NOT EDIT
 Updated automatically on git pull

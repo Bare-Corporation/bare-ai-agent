@@ -7,8 +7,9 @@
 #   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
 #                                                           #
 #  PVE to JSON Data Bridge for LLM Analysis                 #
-#  by the Cloud Integration Corporation                     #
 #  Version: v1.0.0 | Updated: 2026-04-12                    #
+#############################################################
+#  by the Cloud Integration Corporation                     #
 #############################################################
 
 import subprocess

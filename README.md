@@ -1,17 +1,29 @@
 # 🦾 Bare-AI-Agent: Autonomous Infrastructure Management (The Sovereign Mesh)
-bare-ai-agent is the autonomous "Hands" of the Bare-AI ecosystem. It is designed to be installed on any Linux VM, container, or physical machine to provide agentic capabilities, while calling upon a centralized "Brain" for intelligence.
+Bare-AI is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding. The project also comes pre installed with bare-brain which is a centralized "Brain" written in bash for agentic fleet intelligence. Note: a premium version of the brain exists seperatly (for a fee) which is written in Golang.
 
 **Version:** 5.1.2- Enterprise (Hybrid Architect Edition)  
 **Author:** Cian Egan  
-**Date:** 2026-04-11 
+**Created Date:** 2026-02-02
+**Updated Date:** 2026-04-13
 **Repository:** [github.com/Cian-CloudIntCorp/bare-ai-agent](https://github.com/Cian-CloudIntCorp/bare-ai-agent)
 
 Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data pipelines and infrastructure integrity across Linux and Windows environments. The system supports **dual AI engines** — choose between the sovereign Bare-AI-CLI or Google's Gemini-CLI.
 
 ---
 
+## 🛠 Features
+- **Identity:** Autonomous Linux Agent with Level 4 Autonomy.
+- **Security:** Zero-Knowledge local secret injection via Vault AppRole.
+- **Intelligence:** Hybrid routing between Google Gemma 4 (31B) and local optimized models (DeepSeek, Granite).
+- **Grounding:** Sovereign search via SearXNG (Chinese & Global results).
+- **Telemetry:** Real-time hardware audits via the `bare-necessities` toolkit.
+- **Self-Healing Data Pipelines:** Autonomous error detection and log sniping.
+- **Context Management:** High-speed AST mapping for large codebases.
+- **Thermal Awareness:** Real-time system Tctl monitoring and load balancing.
+- **AI Diary:** Persistent session memory to prevent hallucination loops.
+
 ## 🏛️ System Architecture
-This project is designed to mimic the cloud AI experience (like Chat GPT or Google Gemini etc) but entirely on your own hardware:
+This project is designed to mimic the cloud AI terminal Command line interface (CLI) experience (like Google Gemini or Claude Code etc) but entirely on your own hardware.
 
 The AI model(s): 1 centralized High-Performance VM or PC running an LLM (e.g., Ollama/vLLM with Granite 4).
 
@@ -79,6 +91,9 @@ bare-ai-agent/
 ├── constitution.md
 ├── fleet.conf
 └── scripts/
+    │── bare-necessities/
+    │   ├── bare-bash-scripts
+    │   ├── bare-python3-scripts
     ├── brain/
     │   ├── bare-brain-compiled
     │   └── setup_bare-brain.sh
@@ -116,10 +131,12 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 Run this on the target worker machine:
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
+# 1 Clone the repository
+git clone [https://github.com/Cian-CloudIntCorp/bare-ai-agent.git](https://github.com/Cian-CloudIntCorp/bare-ai-agent.git) ~/bare-ai-agent
 
-# 2. Run the worker installer
+# 2 Launch the Installer
+# Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
+
 cd ~/bare-ai-agent/scripts/worker
 chmod +x setup_bare-ai-worker.sh
 ./setup_bare-ai-worker.sh
@@ -130,8 +147,6 @@ source ~/.bashrc
 # 4. Verify
 bare-summarize
 ```
-
-The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
 
 ---
 
@@ -268,6 +283,19 @@ export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 ## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
 Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
 
+## 🧰 The Bare-Necessities AI Deterministic Toolkit (put simply: Saves tokens) 
+The installer deploys global symlinks in bash or python3 for optimised host management:
+
+##  #  Alias        Function           Target
+##  1  cpu-temp     Thermal Audit      Debian based system / Tctl Priority
+##  2  pve-check    Resource Monitor   Proxmox VM/CT Logic 
+##  3  ai-monitor   Memory Pressure    RAM/VRAM Check
+##  4  code-map     AST Mapping        Deep Code Analysis
+##  n  YourScript   Here... ;)         UseCase: anything with global resuable usecases
+
+## ⚖️ Technical Constitution
+The agent operates under a read-only Technical Constitution found in ~/.bare-ai/technical-constitution.md. This defines tool-use boundaries, resource limits, and sovereign operational style.
+
 ## 🆕 What's New in v5.1.0
 
 - ✅ Dual engine support — Bare-AI-CLI and Gemini-CLI
@@ -282,3 +310,14 @@ Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional
 ## 📝 License
 
 Apache-2.0
+
+## by the Cloud Integration Corporation
+
+#    ____ _                  _ _       _         ____       
+#   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   
+#  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ 
+#  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |
+#   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ 
+#                                                           
+
+

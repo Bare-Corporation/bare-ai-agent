@@ -8,8 +8,9 @@
 #                                                           #
 #  Journalctl Severity Filter (1hr)                         #
 #  AI Model & VRAM/RAM Pressure Monitor                     #
-#  by the Cloud Integration Corporation                     #
 #  Version: v1.0.0 | Updated: 2026-04-12                    #
+#############################################################
+#  by the Cloud Integration Corporation                     #
 #############################################################
 
 import psutil
