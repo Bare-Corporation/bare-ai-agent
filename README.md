@@ -168,7 +168,7 @@ Run this on the target worker machine:
 
 ```bash
 # 1 Clone the repository
-git clone [https://github.com/Cian-CloudIntCorp/bare-ai-agent.git] https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
+git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
 
 # 2 Launch the Installer
 # Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
