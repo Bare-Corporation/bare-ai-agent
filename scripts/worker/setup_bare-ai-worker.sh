@@ -38,7 +38,12 @@ echo "1) Bare-AI-CLI (Sovereign, Local-First, Vault-Integrated)"
 echo "2) Gemini-CLI (Standard Google Cloud SDK)"
 read -rp "Enter choice [1 or 2]: " ENGINE_CHOICE
 
-CONFIG_FILE="$HOME/.bare-ai/config"
+# i. Define the directory and the actual file
+CONFIG_DIR="$HOME/.bare-ai/config"
+CONFIG_FILE="$CONFIG_DIR/agent.env"
+
+# ii. Safely create the directory structure first
+mkdir -p "$CONFIG_DIR"
 
 if [ "$ENGINE_CHOICE" == "1" ]; then
     ENGINE_TYPE="sovereign"
@@ -46,7 +51,7 @@ else
     ENGINE_TYPE="gemini"
 fi
 
-# FORCE UPDATE the engine type in the config file, even if it exists
+# iii. Safely touch the file and inject the engine type
 touch "$CONFIG_FILE"
 sed -i '/export ENGINE_TYPE=/d' "$CONFIG_FILE"
 echo "export ENGINE_TYPE=\"$ENGINE_TYPE\"" >> "$CONFIG_FILE"
@@ -338,12 +343,13 @@ fi
 #####################################################
 
 # --- 4. AGENT CONFIG ---
-if [ ! -f "$CONFIG_FILE" ]; then
+echo -e "${YELLOW}Checking Agent ID...${NC}"
+if ! grep -q "export AGENT_ID=" "$CONFIG_FILE" 2>/dev/null; then
     AGENT_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "BARE-$(date +%s)-${RANDOM}")
-    execute_command "printf 'AGENT_ID=%s\nENGINE_TYPE=%s\n' \"$AGENT_ID\" \"$ENGINE_TYPE\" > \"$CONFIG_FILE\"" "Write agent config"
-    echo -e "${GREEN}✓ Agent config written (ID: $AGENT_ID)${NC}"
+    echo "export AGENT_ID=\"$AGENT_ID\"" >> "$CONFIG_FILE"
+    echo -e "${GREEN}✓ Agent ID generated and saved: $AGENT_ID${NC}"
 else
-    echo -e "${YELLOW}⚠️  Config already exists, skipping ID generation${NC}"
+    echo -e "${YELLOW}⚠️  Agent ID already exists, skipping generation${NC}"
 fi
 
 #####################################################
