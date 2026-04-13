@@ -245,7 +245,7 @@ Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with en
 - The Brain's Vault credentials are **never stored in this repository**
 - Workers operate with minimal permissions — telemetry reporting and reflex execution only
 - All telemetry is logged locally in JSON format
-- No data leaves your network unless you choose the Gemini engine
+- No data leaves your network unless you choose the Google Gemini engine (option 2).
 
 See [SECURITY.md](SECURITY.md) for the full security policy.
 
@@ -282,6 +282,16 @@ export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 
 ## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
 Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
+
+## Architecture Note re TailscaleLAN: 
+
+Transport Layer Security While the SearXNG endpoint utilises standard HTTP, it is vital to note that all fleet communication occurs over a Tailscale/Headscale (CGNAT) overlay network where you elect to use tailscale/headscale (highly recommended by the Cloud Integration Corporation). 
+
+Encapsulated Encryption: All traffic within the 100.x.x.x range is automatically encapsulated within an encrypted WireGuard tunnel. This provides robust transport-layer security across both local and public networks, regardless of the application-layer protocol (HTTP or HTTPS).
+
+Cosmetic SSL Termination: For environments requiring end-to-end TLS for compliance or cosmetic consistency, a reverse proxy (e.g., NGINX, Caddy, or Traefik) can be implemented to provide an HTTPS head-end. Please note: Reverse proxys are not provided as part of this project though. Please also remember that headscale/tailscale is not either but we use it in our own impelmentation by default and inside/Outside our own LAN and accept the slight latency delay (adds 30/40ms in our testing but worth it for security).
+
+Sovereign Privacy: By leveraging the Tailscale VPN layer, the mesh ensures that search queries and vault secrets remain invisible to the underlying ISP or local network sniffers.
 
 ## 🧰 The Bare-Necessities AI Deterministic Toolkit (put simply: Saves tokens) 
 The installer deploys global symlinks in bash or python3 for optimised host management:
