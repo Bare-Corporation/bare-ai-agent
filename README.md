@@ -6,7 +6,7 @@ Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework desi
 
 Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
-**Version:** 5.1.2- Enterprise (Hybrid Architect Edition)  
+**Version:** 5.2.0 - Enterprise (Hybrid Architect Edition)  
 **Author:** Cian Egan  (CEO & Chief Architect at the Cloud Integration Corporation)
 **Created Date:** 2026-02-02
 **Updated Date:** 2026-04-13
@@ -168,7 +168,7 @@ Run this on the target worker machine:
 
 ```bash
 # 1 Clone the repository
-git clone [https://github.com/Cian-CloudIntCorp/bare-ai-agent.git](https://github.com/Cian-CloudIntCorp/bare-ai-agent.git) ~/bare-ai-agent
+git clone [https://github.com/Cian-CloudIntCorp/bare-ai-agent.git] https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
 
 # 2 Launch the Installer
 # Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
