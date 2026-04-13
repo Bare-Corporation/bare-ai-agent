@@ -1,14 +1,16 @@
 # 🦾 Bare-AI-Agent: Autonomous Infrastructure Management (The Sovereign Mesh)
 
-Bare-AI is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding. The project also comes pre installed with bare-brain which is a centralized "Brain" written in bash for agentic fleet intelligence. Note: a premium version of the brain exists seperatly (for a fee) which is written in Golang.
+Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data pipelines and infrastructure integrity across Linux and Windows environments. The system supports **dual AI engines** — choose between the sovereign Bare-AI-CLI or Google's Gemini-CLI.
+
+Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding. The project also comes pre installed with bare-brain which is a centralized "Brain" written in bash for agentic fleet intelligence. Note: a premium version of the brain exists seperatly (for a fee) which is written in Golang.
+
+Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
 **Version:** 5.1.2- Enterprise (Hybrid Architect Edition)  
-**Author:** Cian Egan  
+**Author:** Cian Egan  (CEO & Chief Architect at the Cloud Integration Corporation)
 **Created Date:** 2026-02-02
 **Updated Date:** 2026-04-13
 **Repository:** [github.com/Cian-CloudIntCorp/bare-ai-agent](https://github.com/Cian-CloudIntCorp/bare-ai-agent)
-
-Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data pipelines and infrastructure integrity across Linux and Windows environments. The system supports **dual AI engines** — choose between the sovereign Bare-AI-CLI or Google's Gemini-CLI.
 
 ---
 
@@ -112,7 +114,6 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | jq | JSON processor | Required for `bare-status` |
 
 ---
-🔐 Refined Vault Section (Copy/Paste this fix)Replace the text from your "Vault Configuration" section with this formatted version:Markdown---
 
 ## 🔐 Vault Configuration (Mandatory)
 
@@ -134,7 +135,7 @@ export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 ## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
 Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
 
-## Architecture Note Regarding the Optional TailscaleLAN: 
+## 📝 Architecture Note Regarding the Optional TailscaleLAN: 
 
 Transport Layer Security While the SearXNG endpoint utilises standard HTTP, it is vital to note that all fleet communication occurs over a Tailscale/Headscale (CGNAT) overlay network where you elect to use tailscale/headscale (highly recommended by the Cloud Integration Corporation). 
 
@@ -147,11 +148,13 @@ Sovereign Privacy: By leveraging the Tailscale VPN layer, the mesh ensures that 
 ## 🧰 The Bare-Necessities AI Deterministic Toolkit (put simply: Saves tokens) 
 The installer deploys global symlinks in bash or python3 for optimised host management:
 
--  #  Alias        Function           Target
--  1  cpu-temp     Thermal Audit      Debian based system / Tctl Priority
--  2  pve-check    Resource Monitor   Proxmox VM/CT Logic 
--  3  ai-monitor   Memory Pressure    RAM/VRAM Check
--  4  code-map     AST Mapping        Deep Code Analysis
+
+| Alias | Function | Target |
+|--------|------|----------|
+| cpu-temp | Thermal Audit | Debian based system / Tctl Priority |
+| pve-check | Resource Monitor | Proxmox VM/CT Logic |
+| ai-monitor | Memory Pressure | RAM/VRAM Check |
+| code-map | AST Mapping  | Deep Code Analysis |
 
 ---
 
@@ -310,6 +313,11 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 ```
 
 ---
+
+# What's New in v5.2.0
+- ✅ Sovereign Search Integration — Native SearXNG support via BARE_AI_SEARCH_URL with automatic Google fallback.
+- ✅ Vault Credential Automation — Dynamic generation of vault.env featuring CIC architecture documentation and ASCII branding.
+- ✅ Deterministic Tooling — Full deployment of the bare-necessities toolkit (cpu-temp, pve-check, etc.) with global symlink mapping.
 
 ## 🆕 What's New in v5.1.0
 
