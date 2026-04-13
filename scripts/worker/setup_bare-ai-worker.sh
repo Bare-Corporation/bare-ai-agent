@@ -506,8 +506,16 @@ BARE_FUNC_EOF
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI WORKER SETUP COMPLETE${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc"
+
+# Check if Vault needs configuration
+if grep -q "your-role-id-here" "$HOME/.bare-ai/config/vault.env" 2>/dev/null; then
+    echo -e "${RED}⚠️  ACTION REQUIRED: Vault Credentials Missing!${NC}"
+    echo -e "${YELLOW}   You must add your real Role ID and Secret ID before running the agent.${NC}"
+    echo -e "   Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
+fi
+
+echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc"
 echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize"
-echo -e "3. ${YELLOW}Run agent:${NC}     bare granite"
-echo -e "5. ${YELLOW}Edit role:${NC}     bare-role  (customise your agent personality)"
-echo -e "4. ${YELLOW}Engine type:${NC}   $ENGINE_TYPE"
+echo -e "3. ${YELLOW}Run agent:${NC}     bare granite"
+echo -e "4. ${YELLOW}Edit role:${NC}     bare-role  (customise your agent personality)"
+echo -e "5. ${YELLOW}Engine type:${NC}   $ENGINE_TYPE"
