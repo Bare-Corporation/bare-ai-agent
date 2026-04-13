@@ -1,4 +1,5 @@
 # 🦾 Bare-AI-Agent: Autonomous Infrastructure Management (The Sovereign Mesh)
+
 Bare-AI is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding. The project also comes pre installed with bare-brain which is a centralized "Brain" written in bash for agentic fleet intelligence. Note: a premium version of the brain exists seperatly (for a fee) which is written in Golang.
 
 **Version:** 5.1.2- Enterprise (Hybrid Architect Edition)  
@@ -56,9 +57,17 @@ The fleet follows a strict role-based hierarchy to ensure safety and scalability
 **Role:** Telemetry reporting and payload execution.  
 **Core Tool:** `bare-summarize` — outputs structured JSON telemetry for the Brain.
 
+## 3a. ⚖️ Bare-ai-agent Workers Technical Constitution
+The worker agent(s) operates under a read-only Technical Constitution found in ~/.bare-ai/technical-constitution.md. This defines tool-use boundaries, resource limits, and sovereign operational style.
+
+## 3b. ⚖️ Bare-ai-agent Workers Functional Constitution
+The worker agent(s) operates under a configurable (end user defined) Functional Constitution found in ~/.bare-ai/role.md. This defines the ai persona, skill set, functional boundaries, examples: You are a developer, doctor, lawyer, CEO, etc, the limits are endless.
+
 ---
 
 ## 🤖 Hybrid Engine Support
+
+You can deploy the bare-ai-agent on different Command Line Interfaces (CLIs) namely:
 
 | Engine | Type | Use Case |
 |--------|------|----------|
@@ -81,44 +90,68 @@ Tools have no extension so the underlying implementation (Bash, Python, Go) can 
 
 ---
 
-## 📁 Repository Structure
+## 🔒 Security Notes
 
-```
-bare-ai-agent/
-├── ARCHITECTURE.md
-├── README.md
-├── SECURITY.md
-├── constitution.md
-├── fleet.conf
-└── scripts/
-    │── bare-necessities/
-    │   ├── bare-bash-scripts
-    │   ├── bare-python3-scripts
-    ├── brain/
-    │   ├── bare-brain-compiled
-    │   └── setup_bare-brain.sh
-    ├── dev/
-    │   └── setup_bare-ai-dev.sh
-    ├── worker/
-    │   ├── bare-summarize
-    │   └── setup_bare-ai-worker.sh
-    └── windows_alpha/
+- The Architect Console runs on your local dev machine — **never on production servers**
+- The Brain's Vault credentials are **never stored in this repository**
+- Workers operate with minimal permissions — telemetry reporting and reflex execution only
+- All telemetry is logged locally in JSON format
+- No data leaves your network unless you choose the Google Gemini engine (option 2).
+
+See [SECURITY.md](SECURITY.md) for the full security policy.
+
+---
+
+## 📦 Dependencies
+
+| Component | Requirement | Notes |
+|-----------|-------------|-------|
+| Bare-AI-CLI | Node.js, npm | `npm install -g bare-ai-cli` |
+| Gemini-CLI | Node.js, npm | `sudo npm install -g @google/gemini-cli` |
+| SSH | OpenSSH client | Required for `bare-enroll` |
+| jq | JSON processor | Required for `bare-status` |
+
+---
+🔐 Refined Vault Section (Copy/Paste this fix)Replace the text from your "Vault Configuration" section with this formatted version:Markdown---
+
+## 🔐 Vault Configuration (Mandatory)
+
+The agent remains "Sovereign" by fetching its own connection details from your centralized Vault server. 
+
+1. Configure the Agent's Vault Access
+After installation, edit your local credentials to allow the agent to talk to your Vault server:
+`nano ~/.bare-ai/config/vault.env`
+
+The installer generates this file with `export` keywords. Simply fill in your details:
+```bash
+export VAULT_ADDR=https://<YOUR_VAULT_IP>:8200
+export VAULT_ROLE_ID=<YOUR_APPROLE_ID>
+export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 ```
 
-After installation, runtime config is auto-created at `~/.bare-ai/`:
+2. Configure the Secret Path in VaultThe agent fetches its intelligence endpoint from a secret path (default: secret/data/granite/config).Required Keys in your Vault Secret:KeyValue ExampleDescriptionBARE_AI_ENDPOINThttp://192.168.86.130:11434/v1/chat/completionsThe LAN IP of your Inference Server.BARE_AI_MODELgranite4:3bThe specific model name running on the Brain.
 
-```
-~/.bare-ai/
-├── bin/              # Installed tools (added to PATH)
-│   ├── bare-enroll
-│   ├── bare-audit
-│   └── bare-summarize
-├── diary/            # Daily AI conversation logs
-├── logs/             # JSON telemetry logs
-├── config            # Agent config (AGENT_ID, ENGINE_TYPE)
-├── agent.env         # Repo path (set at install time)
-└── constitution.md   # Core identity and operational rules
-```
+## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
+Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
+
+## Architecture Note Regarding the Optional TailscaleLAN: 
+
+Transport Layer Security While the SearXNG endpoint utilises standard HTTP, it is vital to note that all fleet communication occurs over a Tailscale/Headscale (CGNAT) overlay network where you elect to use tailscale/headscale (highly recommended by the Cloud Integration Corporation). 
+
+Encapsulated Encryption: All traffic within the 100.x.x.x range is automatically encapsulated within an encrypted WireGuard tunnel. This provides robust transport-layer security across both local and public networks, regardless of the application-layer protocol (HTTP or HTTPS).
+
+Cosmetic SSL Termination: For environments requiring end-to-end TLS for compliance or cosmetic consistency, a reverse proxy (e.g., NGINX, Caddy, or Traefik) can be implemented to provide an HTTPS head-end. Please note: Reverse proxys are not provided as part of this project though. Please also remember that headscale/tailscale is not either but we use it in our own impelmentation by default and inside/Outside our own LAN and accept the slight latency delay (adds 30/40ms in our testing but worth it for security).
+
+Sovereign Privacy: By leveraging the Tailscale VPN layer, the mesh ensures that search queries and vault secrets remain invisible to the underlying ISP or local network sniffers.
+
+## 🧰 The Bare-Necessities AI Deterministic Toolkit (put simply: Saves tokens) 
+The installer deploys global symlinks in bash or python3 for optimised host management:
+
+-  #  Alias        Function           Target
+-  1  cpu-temp     Thermal Audit      Debian based system / Tctl Priority
+-  2  pve-check    Resource Monitor   Proxmox VM/CT Logic 
+-  3  ai-monitor   Memory Pressure    RAM/VRAM Check
+-  4  code-map     AST Mapping        Deep Code Analysis
 
 ---
 
@@ -237,74 +270,46 @@ bare-cd
 
 Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with engine tagging (🤖 Bare-AI / ✨ Gemini).
 
----
+## 📁 Repository Structure
 
-## 🔒 Security Notes
-
-- The Architect Console runs on your local dev machine — **never on production servers**
-- The Brain's Vault credentials are **never stored in this repository**
-- Workers operate with minimal permissions — telemetry reporting and reflex execution only
-- All telemetry is logged locally in JSON format
-- No data leaves your network unless you choose the Google Gemini engine (option 2).
-
-See [SECURITY.md](SECURITY.md) for the full security policy.
-
----
-
-## 📦 Dependencies
-
-| Component | Requirement | Notes |
-|-----------|-------------|-------|
-| Bare-AI-CLI | Node.js, npm | `npm install -g bare-ai-cli` |
-| Gemini-CLI | Node.js, npm | `sudo npm install -g @google/gemini-cli` |
-| SSH | OpenSSH client | Required for `bare-enroll` |
-| jq | JSON processor | Required for `bare-status` |
-
----
-🔐 Refined Vault Section (Copy/Paste this fix)Replace the text from your "Vault Configuration" section with this formatted version:Markdown---
-
-## 🔐 Vault Configuration (Mandatory)
-
-The agent remains "Sovereign" by fetching its own connection details from your centralized Vault server. 
-
-1. Configure the Agent's Vault Access
-After installation, edit your local credentials to allow the agent to talk to your Vault server:
-`nano ~/.bare-ai/config/vault.env`
-
-The installer generates this file with `export` keywords. Simply fill in your details:
-```bash
-export VAULT_ADDR=https://<YOUR_VAULT_IP>:8200
-export VAULT_ROLE_ID=<YOUR_APPROLE_ID>
-export VAULT_SECRET_ID=<YOUR_SECRET_ID>
+```
+bare-ai-agent/
+├── ARCHITECTURE.md
+├── README.md
+├── SECURITY.md
+├── constitution.md
+├── fleet.conf
+└── scripts/
+    │── bare-necessities/
+    │   ├── bare-bash-scripts
+    │   ├── bare-python3-scripts
+    ├── brain/
+    │   ├── bare-brain-compiled
+    │   └── setup_bare-brain.sh
+    ├── dev/
+    │   └── setup_bare-ai-dev.sh
+    ├── worker/
+    │   ├── bare-summarize
+    │   └── setup_bare-ai-worker.sh
+    └── windows_alpha/
 ```
 
-2. Configure the Secret Path in VaultThe agent fetches its intelligence endpoint from a secret path (default: secret/data/granite/config).Required Keys in your Vault Secret:KeyValue ExampleDescriptionBARE_AI_ENDPOINThttp://192.168.86.130:11434/v1/chat/completionsThe LAN IP of your Inference Server.BARE_AI_MODELgranite4:3bThe specific model name running on the Brain.
+After installation, runtime config is auto-created at `~/.bare-ai/`:
 
-## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
-Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
+```
+~/.bare-ai/
+├── bin/              # Installed tools (added to PATH)
+│   ├── bare-enroll
+│   ├── bare-audit
+│   └── bare-summarize
+├── diary/            # Daily AI conversation logs
+├── logs/             # JSON telemetry logs
+├── config            # Agent config (AGENT_ID, ENGINE_TYPE)
+├── agent.env         # Repo path (set at install time)
+└── constitution.md   # Core identity and operational rules
+```
 
-## Architecture Note re TailscaleLAN: 
-
-Transport Layer Security While the SearXNG endpoint utilises standard HTTP, it is vital to note that all fleet communication occurs over a Tailscale/Headscale (CGNAT) overlay network where you elect to use tailscale/headscale (highly recommended by the Cloud Integration Corporation). 
-
-Encapsulated Encryption: All traffic within the 100.x.x.x range is automatically encapsulated within an encrypted WireGuard tunnel. This provides robust transport-layer security across both local and public networks, regardless of the application-layer protocol (HTTP or HTTPS).
-
-Cosmetic SSL Termination: For environments requiring end-to-end TLS for compliance or cosmetic consistency, a reverse proxy (e.g., NGINX, Caddy, or Traefik) can be implemented to provide an HTTPS head-end. Please note: Reverse proxys are not provided as part of this project though. Please also remember that headscale/tailscale is not either but we use it in our own impelmentation by default and inside/Outside our own LAN and accept the slight latency delay (adds 30/40ms in our testing but worth it for security).
-
-Sovereign Privacy: By leveraging the Tailscale VPN layer, the mesh ensures that search queries and vault secrets remain invisible to the underlying ISP or local network sniffers.
-
-## 🧰 The Bare-Necessities AI Deterministic Toolkit (put simply: Saves tokens) 
-The installer deploys global symlinks in bash or python3 for optimised host management:
-
-##  #  Alias        Function           Target
-##  1  cpu-temp     Thermal Audit      Debian based system / Tctl Priority
-##  2  pve-check    Resource Monitor   Proxmox VM/CT Logic 
-##  3  ai-monitor   Memory Pressure    RAM/VRAM Check
-##  4  code-map     AST Mapping        Deep Code Analysis
-##  n  YourScript   Here... ;)         UseCase: anything with global resuable usecases
-
-## ⚖️ Technical Constitution
-The agent operates under a read-only Technical Constitution found in ~/.bare-ai/technical-constitution.md. This defines tool-use boundaries, resource limits, and sovereign operational style.
+---
 
 ## 🆕 What's New in v5.1.0
 
@@ -323,11 +328,9 @@ Apache-2.0
 
 ## by the Cloud Integration Corporation
 
-#    ____ _                  _ _       _         ____       
-#   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   
-#  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ 
-#  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |
-#   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ 
-#                                                           
-
-
+```text
+    ____ _                  _ _       _         ____       
+   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   
+  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \  
+  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) | 
+   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/
