@@ -385,6 +385,7 @@ if [ ! -f "$ROLE_CONST" ]; then
         cp "$ROLE_STARTER" "$ROLE_CONST"
         echo -e "${GREEN}✓ Starter role constitution created at ~/.bare-ai/role.md${NC}"
         echo -e "${YELLOW}  → Please edit ~/.bare-ai/role.md to define this node's personality and mission.${NC}"
+        
     else
         echo -e "${YELLOW}⚠️  Role starter template not found — creating blank role.md${NC}"
         echo "# BARE-AI ROLE CONSTITUTION
@@ -393,6 +394,10 @@ if [ ! -f "$ROLE_CONST" ]; then
 else
     echo -e "${GREEN}✓ Role constitution already exists — not overwritten${NC}"
 fi
+
+# ALWAYS create/refresh the visible symlink in the clone directory
+ln -sf "$ROLE_CONST" "$REPO_DIR/role.md"
+echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
 
 #####################################################
 #####################################################
@@ -517,7 +522,7 @@ bare() {
     case "$MODEL" in
         energy)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
         loco)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        granite) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
+        granite3) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
         gemma4)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
         *)       export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
     esac
@@ -528,6 +533,10 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
+        
+        # Safely remove the model name ONLY if arguments exist
+        if [ $# -gt 0 ]; then shift; fi
+        
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@"
         # Log forwarding
         if [ -f "BARE.md" ]; then
