@@ -64,6 +64,7 @@ LOG_DIR="$BARE_AI_DIR/logs"
 DIARY_DIR="$BARE_AI_DIR/diary"
 CONFIG_FILE="$BARE_AI_DIR/config/agent.env" # <--- FIXED: Now points to a file inside the config dir
 CLI_REPO_DIR="$HOME/bare-ai-cli"
+BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
 
 # --- SOURCE DIR DETECTION (Path Paradox Fix) ---
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -248,38 +249,6 @@ execute_command "chmod +x \"$DEST_BIN\"" "Make bare-summarize executable"
 #####################################################
 #####################################################
 
-# --- 2b. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
-echo -e "${YELLOW}Deploying bare-necessities toolset...${NC}"
-BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
-
-if [ -d "$BARE_NECESSITIES_DIR" ]; then
-    echo -e "${YELLOW}Setting executable permissions...${NC}"
-    # Find all .sh and .py files in the toolkit and make them executable
-    execute_command "find \"$BARE_NECESSITIES_DIR\" -type f -name \"*.sh\" -o -name \"*.py\" -exec chmod +x {} +" "Make toolkit scripts executable"
-
-    echo -e "${YELLOW}Creating global symlinks in /usr/local/bin...${NC}"
-    
-    # Bash tools
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp" "Symlink cpu-temp"
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check" "Symlink pve-check"
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health" "Symlink disk-health"
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit" "Symlink net-audit"
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log" "Symlink error-log"
-
-    # Python tools
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor" "Symlink ai-monitor"
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map" "Symlink code-map"
-    execute_command "sudo ln -sf \"$BARE_NECESSITIES_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json" "Symlink pve-json"
-
-    echo -e "${GREEN}✓ bare-necessities deployed successfully${NC}"
-else
-    echo -e "${YELLOW}⚠️ bare-necessities directory not found at $BARE_NECESSITIES_DIR. Skipping toolkit deployment.${NC}"
-fi
-
-#####################################################
-#####################################################
-#####################################################
-
 # --- 3. ENGINE INSTALLATION ---
 if [ "$ENGINE_CHOICE" == "1" ]; then
     echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
@@ -342,7 +311,47 @@ fi
 #####################################################
 #####################################################
 
-# --- 4. AGENT CONFIG ---
+# --- 4 BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
+echo -e "${YELLOW}Deploying bare-necessities toolset to CLI workspace jail...${NC}"
+CLI_SCRIPTS_DIR="$HOME/bare-ai-cli/my-bare-scripts"
+
+# 1. Create the internal jail-compliant folder
+execute_command "mkdir -p \"$CLI_SCRIPTS_DIR\"" "Create CLI script jail"
+
+if [ -d "$BARE_NECESSITIES_DIR" ]; then
+    # 2. Sync toolkit to the jail
+    echo -e "${YELLOW}Syncing toolkit to $CLI_SCRIPTS_DIR...${NC}"
+    execute_command "cp -r \"$BARE_NECESSITIES_DIR/\"* \"$CLI_SCRIPTS_DIR/\"" "Copy tools into jail"
+
+    echo -e "${YELLOW}Setting executable permissions in jail...${NC}"
+    execute_command "find \"$CLI_SCRIPTS_DIR\" -type f -name \"*.sh\" -o -name \"*.py\" -exec chmod +x {} +" "Make jail scripts executable"
+
+    echo -e "${YELLOW}Creating global symlinks in /usr/local/bin pointing to jail...${NC}"
+    
+    # 3. Create Symlinks pointing to the JAILED versions
+    # Bash tools
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp" "Symlink cpu-temp"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check" "Symlink pve-check"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health" "Symlink disk-health"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit" "Symlink net-audit"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log" "Symlink error-log"
+
+    # Python tools
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor" "Symlink ai-monitor"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map" "Symlink code-map"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json" "Symlink pve-json"
+
+    echo -e "${GREEN}✓ bare-necessities deployed and jailed successfully${NC}"
+else
+    echo -e "${YELLOW}⚠️ bare-necessities source not found at $BARE_NECESSITIES_DIR. Skipping toolkit deployment.${NC}"
+fi
+
+
+#####################################################
+#####################################################
+#####################################################
+
+# --- 5. AGENT CONFIG ---
 echo -e "${YELLOW}Checking Agent ID...${NC}"
 if ! grep -q "export AGENT_ID=" "$CONFIG_FILE" 2>/dev/null; then
     AGENT_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "BARE-$(date +%s)-${RANDOM}")
@@ -356,7 +365,7 @@ fi
 #####################################################
 #####################################################
 
-# --- 5. CONSTITUTIONS ---
+# --- 6. CONSTITUTIONS ---
 # technical-constitution.md — base Linux rules, managed by bare-ai-agent, read-only
 # role.md                   — node personality, user-owned, never overwritten
 
@@ -403,7 +412,7 @@ echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
 #####################################################
 #####################################################
 
-# --- 6. README ---
+# --- 7. README ---
 echo -e "${YELLOW}Writing README.md...${NC}"
 cat << 'README_EOF' > "$BARE_AI_DIR/README.md"
 # BARE-AI Setup and Configuration
@@ -438,7 +447,7 @@ echo -e "${GREEN}✓ README written${NC}"
 #####################################################
 #####################################################
 
-# --- 7. TELEMETRY PING ---
+# --- 8. TELEMETRY PING ---
 # FIX: Use full https:// URL and suppress errors so set -e is not tripped on network issues
 TELEMETRY_URL="https://www.bare-erp.com"
 echo -e "${YELLOW}Pinging telemetry endpoint...${NC}"
@@ -449,7 +458,7 @@ echo -e "${GREEN}✓ Telemetry ping: HTTP $HTTP_CODE${NC}"
 #####################################################
 #####################################################
 
-# --- 8. BASHRC UPDATES ---
+# --- 9. BASHRC UPDATES ---
 BASHRC_FILE="$HOME/.bashrc"
 echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
 
@@ -457,7 +466,7 @@ echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
 #####################################################
 #####################################################
 
-# 8a. PATH entry
+# 9a. PATH entry
 if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
     cat << 'PATH_EOF' >> "$BASHRC_FILE"
 
@@ -475,12 +484,13 @@ fi
 #####################################################
 #####################################################
 
-# 8b. bare() hybrid loader function
+# 9b. bare() hybrid loader function
 # Clean out old BARE-AI Hybrid Loader block to ensure fresh injection
 if grep -q "# BARE-AI Hybrid Loader" "$BASHRC_FILE"; then
     echo -e "${YELLOW}Removing legacy bare() function to apply updates...${NC}"
     # Use sed to delete everything between the marker and the alias block
     sed -i '/# BARE-AI Hybrid Loader/,/^alias bare-constitution/d' "$BASHRC_FILE"
+
 fi
 
 cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
@@ -526,6 +536,11 @@ bare() {
         gemma4)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
         *)       export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
     esac
+
+    # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
+    export BARE_AI_DISABLE_WORKSPACE_TRUST="true"
+    export BARE_AI_YOLA_MODE="true"
+    # ----------------------------------------
 
     export BARE_AI_CONSTITUTION="$TECH_CONST"
     export BARE_AI_ROLE_CONSTITUTION="$ROLE_CONST"
@@ -573,12 +588,12 @@ BARE_FUNC_EOF
 #####################################################
 #####################################################
 
-# --- COMPLETE ---
+# --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI WORKER SETUP COMPLETE${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
-# Check if Vault needs configuration
+# 10.a Check if Vault needs configuration
 if grep -q "your-role-id-here" "$HOME/.bare-ai/config/vault.env" 2>/dev/null; then
     echo -e "${RED}⚠️  ACTION REQUIRED: Vault Credentials Missing!${NC}"
     echo -e "${YELLOW}   You must add your real Role ID and Secret ID before running the agent.${NC}"
