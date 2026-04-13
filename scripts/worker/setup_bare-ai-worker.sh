@@ -64,7 +64,6 @@ LOG_DIR="$BARE_AI_DIR/logs"
 DIARY_DIR="$BARE_AI_DIR/diary"
 CONFIG_FILE="$BARE_AI_DIR/config/agent.env" # <--- FIXED: Now points to a file inside the config dir
 CLI_REPO_DIR="$HOME/bare-ai-cli"
-BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
 
 # --- SOURCE DIR DETECTION (Path Paradox Fix) ---
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -75,6 +74,7 @@ fi
 # Repo root is two levels up from scripts/worker/
 REPO_DIR="$(cd "$SOURCE_DIR/../.." && pwd)"
 TEMPLATES_DIR="$REPO_DIR/scripts/templates"
+BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
 
 # --- HELPER: execute_command ---
 # Runs a command autonomously, logs result as JSON, honours set -e
