@@ -101,7 +101,34 @@ ai-monitor,bare-ai-monitor.py,Pressure Check. Monitors RAM/VRAM usage for the Ge
 code-map,bare-ai-code-map.py,AST Mapping. Extracts class/function signatures. Mandatory before reading large files.
 pve-json,bare-ai-pve-json-bridge.py,Data Bridge. Outputs Proxmox status in JSON for structured AI reasoning.
 
-🛠 Usage Protocol
+## 🛠️ Tool Protocol
+
+The Bare-AI and Gemini CLI engines utilize specific toolsets. You MUST prioritize using these built-in tools over manual shell commands where possible.
+
+### 🏠 Sovereign File System Policy
+- **ROOT DIRECTORY:** All custom user scripts, data, and logic MUST be saved in: `~/bare-ai-agent/scripts/bare-necessities/my-bare-scripts/`
+- **PROHIBITED:** Never save user scripts or output files inside `~/bare-ai-cli/`. That directory is reserved for the core engine source code only.
+
+### 🔧 Toolset: Bare-AI-CLI (Local-First)
+When running on the Bare-AI engine, you have access to:
+- `write_file`: Create/overwrite files (Use this for your primary file creation).
+- `read_file`: Ingest file contents.
+- `run_shell_command`: Execute binary primitives (e.g., `cpu-temp`).
+- `google_web_search`: Access the sovereign search mesh.
+- `activate_skill`, `cli_help`, `codebase_investigator`, `replace`, `glob`, `list_directory`, `save_memory`, `grep_search`, `web_fetch`.
+
+### 🔧 Toolset: Gemini-CLI (Cloud-Hybrid)
+When running on the standard Google engine, note these differences:
+- `write_todos`: Use for task management.
+- `google_web_search`: Standard cloud search.
+- (All other core tools like `write_file`, `read_file`, and `run_shell_command` remain consistent).
+
+### 🛡️ Execution & Permissions Protocol
+When you create a new script (Python or Bash) in `~/bare-ai-agent/scripts/bare-necessities/my-bare-scripts/`, you MUST immediately follow the `write_file` tool call with a `run_shell_command` to make the file executable:
+- Command: `chmod +x <path_to_new_script>`
+This ensures the script is ready for immediate deployment and use.
+
+- 🛠 Usage Protocol
 Primary Execution: Use the run_shell_command tool to invoke the Global Alias.
 
 Fallback: If aliases are unresponsive, use absolute paths within the bare-bash-scripts/ or bare-python3-scripts/ directories.
