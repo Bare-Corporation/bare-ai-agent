@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #############################################################
-#    ____ _                  _ _       _        ____        #
+#    ____ _                  _ _       _         ____       #
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
 #  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
@@ -15,7 +15,7 @@
 # AUTHOR:         Cian Egan
 # DATE:           2026-04-13
 # UPDATED:        2026-02-02
-# VERSION:        5.2.0-Enterprise (Dynamic Vault Routing & Gemma4)
+# VERSION:        5.2.0-Enterprise (Dynamic Vault Routing)
 # ==============================================================================
 set -euo pipefail
 
@@ -107,7 +107,6 @@ echo -e "${GREEN}✓ Directory structure created${NC}"
 #####################################################
 #####################################################
 
-# --- VAULT PRE-FLIGHT CHECK ---
 # --- 1b. VAULT PRE-FLIGHT & INSTALLATION ---
 echo -e "\n${YELLOW}Checking Vault configuration...${NC}"
 VAULT_ENV_FILE="$HOME/.bare-ai/config/vault.env"
@@ -145,14 +144,58 @@ if [ "$INSTALL_VAULT" = true ]; then
     FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 fi
 
-# Write dynamic vault.env
+# Write dynamic vault.env with CIC ASCII Art
 cat << EOF > "$VAULT_ENV_FILE"
-# Bare-AI Vault Credentials
+#############################################################
+#    ____ _                  _ _       _        ____        #
+#   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
+#  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
+#  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
+#   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
+#                                                           #
+# Bare-AI Vault Credentials                                 #
+#############################################################
+#  by the Cloud Integration Corporation                     #
+#############################################################
+# ==============================================================================
+# VAULT AUTHENTICATION & MODEL ROUTING CONFIGURATION
+# ==============================================================================
+# NOTE: Vault secret paths are defined within .bashrc via the 'bare()' function.
+# ARCHITECTURE RULE: A 1:1 mapping must exist between a Model Alias and its 
+# corresponding Vault Secret Path/Role to ensure security isolation.
+#
+# CURRENT FLEET CONFIGURATION:
+# ------------------------------------------------------------------------------
+# 1. bare energy  : Underpinned by DeepSeek R1 (8B). Optimized via 'tir-na-ai' 
+#                   utilizing iCPU Vulkan acceleration for cross-system parity.
+# 2. bare granite : Dedicated IBM Granite optimized path.
+# 3. bare gemma4  : High-performance Google Gemma 4 (31B) implementation.
+# 4. bare loco    : Standardized local-first optimization routine.
+#
+# EXTENSIBILITY:
+# To integrate new models, append a case to the bare() loader.
+# REQUIRED: Ensure 'bare <new-model>' maps to a unique Vault secret path/role.
+# ==============================================================================
+
+# Fill in your Vault details and re-run the installer
 export VAULT_ADDR="$FINAL_VAULT_ADDR"
 export VAULT_ROLE_ID=your-role-id-here
 export VAULT_SECRET_ID=your-secret-id-here
 EOF
 echo -e "${GREEN}✓ Vault config saved pointing to $FINAL_VAULT_ADDR${NC}"
+
+# --- 1c. SOVEREIGN SEARCH SETUP ---
+echo -e "\n${YELLOW}Checking Search Engine configuration...${NC}"
+read -rp "Do you have a Sovereign Search Engine (e.g., local SearXNG) to route traffic? [y/N]: " USE_SEARCH
+if [[ "$USE_SEARCH" =~ ^[Yy]$ ]]; then
+    read -rp "Enter Search URL (e.g., http://192.168.86.130:8080): " SEARCH_ADDR
+    echo -e "\n# Sovereign Search Override" >> "$CONFIG_FILE"
+    echo "export BARE_AI_SEARCH_URL=\"$SEARCH_ADDR\"" >> "$CONFIG_FILE"
+    echo -e "${GREEN}✓ Search URL set to $SEARCH_ADDR${NC}"
+else
+    echo -e "${YELLOW}⚠️ No local search configured. Defaulting to standard search providers.${NC}"
+    echo -e "   ${GREEN}Tip:${NC} To deploy SearXNG later, run: ${YELLOW}docker run -d -p 8080:8080 searxng/searxng${NC}"
+fi
 
 #####################################################
 #####################################################
