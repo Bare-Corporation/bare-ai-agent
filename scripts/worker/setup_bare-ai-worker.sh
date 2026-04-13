@@ -33,10 +33,23 @@ NC="\033[0m"
 echo -e "${GREEN}Starting BARE-AI setup...${NC}"
 
 # --- ENGINE SELECTION ---
-echo -e "\n${YELLOW}Select your AI Engine:${NC}"
-echo -e "1) Bare-AI-CLI (Sovereign, Local-First, Vault-Integrated)"
-echo -e "2) Gemini-CLI (Standard Google Cloud SDK)"
+echo -e "\nSelect your AI Engine:"
+echo "1) Bare-AI-CLI (Sovereign, Local-First, Vault-Integrated)"
+echo "2) Gemini-CLI (Standard Google Cloud SDK)"
 read -rp "Enter choice [1 or 2]: " ENGINE_CHOICE
+
+CONFIG_FILE="$HOME/.bare-ai/config"
+
+if [ "$ENGINE_CHOICE" == "1" ]; then
+    ENGINE_TYPE="sovereign"
+else
+    ENGINE_TYPE="gemini"
+fi
+
+# FORCE UPDATE the engine type in the config file, even if it exists
+touch "$CONFIG_FILE"
+sed -i '/export ENGINE_TYPE=/d' "$CONFIG_FILE"
+echo "export ENGINE_TYPE=\"$ENGINE_TYPE\"" >> "$CONFIG_FILE"
 
 # --- DIRECTORY DEFINITIONS ---
 WORKSPACE_DIR="$HOME/.bare-ai"
