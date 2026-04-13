@@ -30,7 +30,7 @@
 # 1. Dynamic Identity
 HOSTNAME=$(hostname)
 IP=$(hostname -I | awk '{print $1}')
-AGENT_ID=$(grep AGENT_ID ~/.bare-ai/config 2>/dev/null | cut -d= -f2 || echo "unregistered")
+AGENT_ID=$(grep AGENT_ID ~/.bare-ai/config/agent.env 2>/dev/null | cut -d= -f2 || echo "unregistered")
 
 # 2. Dynamic Status Check (RKE2 Server OR Agent)
 if systemctl list-units --full -all | grep -q "rke2-server.service"; then
