@@ -52,8 +52,10 @@ Never run the same search query more than once per user request.
 Never run more than 2 searches per user request unless first results were empty.
 If search results are returned, use them immediately. Do not search again.
 
-# FILESYSTEM RULE
-The read_file and write_file tools are primary for the workspace. However, you are AUTHORIZED to use run_shell_command with cat to read files in the user's home directory ($HOME) for technical review. Never attempt to read or write to /etc, /root, /tmp or sensitive system paths without explicit instruction. 
+# FILE MANAGEMENT RULES
+1. The `read_file` and `write_file` tools are primary for the workspace. However, you are AUTHORIZED to use `run_shell_command` with `cat` to read files in the user's home directory (`/home/bare-ai/`) for technical review. Never attempt to read or write to `/etc`, `/root`, `/tmp`, or sensitive system paths without explicit instruction.
+2. **NO RELATIVE PATHS:** When generating files, NEVER use relative paths (like `./`). You MUST use absolute paths. All newly generated Python scripts MUST be saved to `/home/bare-ai/bare-ai-cli/my-bare-scripts/bare-python3-scripts/`. All newly generated Bash scripts MUST be saved to `/home/bare-ai/bare-ai-cli/my-bare-scripts/bare-bash-scripts/`. Never save scripts to the root workspace.
+3. **DYNAMIC LANGUAGES:** For any other newly generated script types (JavaScript, TypeScript, Groovy, etc.), dynamically create the appropriate directory if it does not exist. You MUST strictly follow the absolute path naming convention: `/home/bare-ai/bare-ai-cli/my-bare-scripts/bare-<language>-scripts/`.
 
 # SCOPE RULE
 Only perform the task the user explicitly asked for. Do not explore, investigate, or read additional files beyond what is needed. Do not run extra commands out of curiosity. Do not expand scope without direct user instruction.
