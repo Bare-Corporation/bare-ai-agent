@@ -158,16 +158,76 @@ fi
 
 # Auto-Install Logic for Local Vault
 if [ "$INSTALL_VAULT" = true ]; then
-    if command -v vault &>/dev/null; then
-        echo -e "${GREEN}✓ Vault binary already installed locally.${NC}"
-    else
-        echo -e "${YELLOW}Installing HashiCorp Vault locally...${NC}"
-        execute_command "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg" "Add HashiCorp GPG key"
-        execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com \$(lsb_release -cs) main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list" "Add HashiCorp Repo"
-        execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault" "Install Vault package"
-        echo -e "${YELLOW}⚠️ Local Vault installed! You MUST run 'vault server -dev' or initialize it for production later.${NC}"
-    fi
+    echo -e "${YELLOW}Installing and Initializing Local HashiCorp Vault...${NC}"
+    
+    # 1. Install Vault and jq (needed for JSON parsing)
+    execute_command "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg" "Add HashiCorp GPG key"
+    execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com \$(lsb_release -cs) main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list" "Add HashiCorp Repo"
+    execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault jq" "Install Vault & jq"
+
+    # 2. Configure Persistent File Storage (Survives Reboot)
+    sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
+storage "file" { path = "/opt/vault/data" }
+listener "tcp" { address = "127.0.0.1:8200"; tls_disable = 1 }
+api_addr = "http://127.0.0.1:8200"
+ui = true
+EOF
+    sudo mkdir -p /opt/vault/data
+    sudo chown -R vault:vault /opt/vault/data /etc/vault.d
+
+    # 3. Start the system service
+    execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
+    sleep 3 # Wait for boot
+
+    export VAULT_ADDR="http://127.0.0.1:8200"
+
+    # 4. Initialize Vault
+    echo -e "${YELLOW}Initializing Vault & generating keys...${NC}"
+    INIT_OUT=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
+    UNSEAL_KEY=$(echo "$INIT_OUT" | jq -r .unseal_keys_b64[0])
+    ROOT_TOKEN=$(echo "$INIT_OUT" | jq -r .root_token)
+
+    # Save keys for the user
+    echo "Root Token: $ROOT_TOKEN" > "$HOME/.bare-ai/config/vault-recovery-keys.txt"
+    echo "Unseal Key: $UNSEAL_KEY" >> "$HOME/.bare-ai/config/vault-recovery-keys.txt"
+    chmod 600 "$HOME/.bare-ai/config/vault-recovery-keys.txt"
+
+    # 5. Unseal and Login
+    vault operator unseal "$UNSEAL_KEY" > /dev/null
+    export VAULT_TOKEN="$ROOT_TOKEN"
+
+    # 6. Enable Engines and Auth
+    vault secrets enable -version=2 -path=secret kv > /dev/null 2>&1 || true
+    vault auth enable approle > /dev/null 2>&1 || true
+
+    # 7. Write AI Policy
+    vault policy write bare-ai-policy - > /dev/null <<EOF
+path "secret/data/*" { capabilities = ["read"] }
+EOF
+
+    # 8. Configure AppRole
+    vault write auth/approle/role/bare-ai-role \
+        secret_id_ttl=0 token_num_uses=0 token_ttl=0 token_max_ttl=0 secret_id_num_uses=0 \
+        policies="bare-ai-policy" > /dev/null
+
+    # 9. Seed Default Models (Prep for tomorrow)
+    echo -e "${YELLOW}Seeding default model endpoints...${NC}"
+    vault kv put secret/tir-na-ai/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai:latest" api_key="local" > /dev/null
+    vault kv put secret/tir-na-ai-fast/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai-fast:latest" api_key="local" > /dev/null
+    vault kv put secret/gemma4/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
+    vault kv put secret/granite/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
+
+    # 10. Extract IDs for the Agent
+    AGENT_ROLE_ID=$(vault read -field=role_id auth/approle/role/bare-ai-role/role-id)
+    AGENT_SECRET_ID=$(vault write -f -field=secret_id auth/approle/role/bare-ai-role/secret-id)
+
     FINAL_VAULT_ADDR="http://127.0.0.1:8200"
+    echo -e "${GREEN}✓ Local Vault initialized and seeded! Recovery keys at ~/.bare-ai/config/vault-recovery-keys.txt${NC}"
+
+else
+    # If using existing vault, leave placeholders
+    AGENT_ROLE_ID="your-role-id-here"
+    AGENT_SECRET_ID="your-secret-id-here"
 fi
 
 # Write dynamic vault.env with CIC ASCII Art
@@ -202,11 +262,10 @@ cat << EOF > "$VAULT_ENV_FILE"
 # To integrate new models, append a case to the bare() loader.
 # REQUIRED: Ensure 'bare <new-model>' maps to a unique Vault secret path/role.
 # ==============================================================================
-
 # Fill in your Vault details and re-run the installer
 export VAULT_ADDR="$FINAL_VAULT_ADDR"
-export VAULT_ROLE_ID=your-role-id-here
-export VAULT_SECRET_ID=your-secret-id-here
+export VAULT_ROLE_ID="$AGENT_ROLE_ID"
+export VAULT_SECRET_ID="$AGENT_SECRET_ID"
 EOF
 echo -e "${GREEN}✓ Vault config saved pointing to $FINAL_VAULT_ADDR${NC}"
 
@@ -343,6 +402,9 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health.sh" "Symlink disk-health.sh"
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit.sh" "Symlink net-audit.sh"
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log.sh" "Symlink error-log.sh"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/grep_search.sh\" /usr/local/bin/grep_search" "Symlink grep_search"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/bare-thermal-guard.sh\" /usr/local/bin/bare-thermal-guard" "Symlink Thermal Guard"
+    sudo chmod +x "$CLI_SCRIPTS_DIR/bare-bash-scripts/bare-thermal-guard.sh"
 
     # Python tools
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor.py" "Symlink ai-monitor.py"
@@ -537,10 +599,10 @@ bare() {
 
     # Sovereign model/vault routing
     case "$MODEL" in
-        energy)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
-        loco)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        granite3) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
-        gemma4)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
+        energy Tír -na ai iGPU)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
+        loco Tír -na ai CPU)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
+        granite4 tiny-h) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
+        gemma4 31b)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
         *)       export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
     esac
 
@@ -588,7 +650,7 @@ bare() {
 alias bare-status='echo "🔍 Local Telemetry Audit:"; bare-summarize | jq .'
 alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
-alias bare-uninstall="$AGENT_DIR/scripts/worker/uninstall_bare-ai.sh"
+alias bare-uninstall='~/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
 BARE_FUNC_EOF
     echo -e "${GREEN}✓ bare() function added to .bashrc${NC}"
 
@@ -611,6 +673,10 @@ fi
 echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your systems ~/.bashrc with modifications.)"
 echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 echo -e "3. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
-echo -e "4. ${GREEN}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
-echo -e "5. ${YELLOW}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
+echo -e "4. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
+echo -e "5. ${GREEN}Architecture:${NC}   $ENGINE_TYPE backend loaded (<< Info only.)"
 echo -e "6. ${RED}Uninstall:${NC}        bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+
+# Set up 1-minute thermal heartbeat
+echo "Setting up thermal monitoring heartbeat..."
+(crontab -l 2>/dev/null | grep -v "bare-thermal-guard"; echo "* * * * * /usr/local/bin/bare-thermal-guard") | crontab -

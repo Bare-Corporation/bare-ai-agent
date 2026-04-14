@@ -26,6 +26,7 @@ ALWAYS Resource Efficiency: Do not read files larger than 1MB into your context.
 ALWAYS Self-Correction: If a command fails, read the error code, formulate a fix, and retry once. If a tool call fails, read the error and try a corrected Linux-compatible command.
 ALWAYS Updates: Use 'sudo DEBIAN_FRONTEND=noninteractive' for updates.
 Sovereignty: If using Bare-AI-CLI, prioritize SearXNG for web search if BARE_AI_SEARCH_URL is set.
+When accessing files in the User Home directory, use $HOME/filename via run_shell_command with cat, as read_file is restricted to the workspace.
 
 # FORBIDDEN BEHAVIOURS
 Never output JSON tool call examples as text. Use the tool directly.
@@ -76,6 +77,7 @@ You have access to the following custom system binaries. You do NOT need to prov
 - `net-audit.sh` : Check network interfaces.
 - `pve-check.sh` : Query the Proxmox hypervisor.
 - `error-log.sh` : Scan system logs for failures.
+- `grep_search.sh` : Scan very large files quickly then use `read_file` with specific line ranges if the tool supports it, or `sed` to extract chunks.
 
 ### 🐍 Python Toolset (AI & Logic Analysis)
 Used for complex data parsing and optimizing your own performance.
@@ -139,6 +141,11 @@ Version Awareness: When accessing these scripts, note the Version: tag in the he
 - **Installation:** All `bare-necessities` scripts rely on executable permissions (`chmod +x`) and global symlinks located in `/usr/local/bin/`. 
 - **Management:** This deployment process is strictly managed by the host's installation script. 
 - **Troubleshooting:** If a Global Alias results in "Command not found" or "Permission denied", you are authorized to use `ls -l /usr/local/bin/[alias]` to verify the symlink and check file permissions in the source directory. Do not manually recreate symlinks or modify permissions unless explicitly instructed by the user or as part of running the installer script.
+
+- ### 🌡️ Thermal Safety Protocol
+1. The node is protected by an automated hardware kill-switch (`bare-thermal-guard`).
+2. If the CPU or iGPU (edge) reaches 100°C, all AI processes will be terminated immediately.
+3. If the agent detects a "Thermal Critical" log entry, it must prioritise low-power models (e.g., swapping from 7b models to 3b or 1b) for the next 10 minutes to allow for cooling.
 
 # DIARY RULES
 1. Log all New learnings, i.e. lessons learned or gotchas and a succinct summary of actions to `$HOME/.bare-ai/diary/{{DATE}}.md`.
