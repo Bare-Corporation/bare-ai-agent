@@ -94,9 +94,11 @@ The Bare-AI and Gemini CLI engines utilize specific toolsets. You MUST prioritiz
 - **ROOT DIRECTORY:** All custom user scripts and agent-generated logic MUST be saved in: `$HOME/bare-ai-cli/my-bare-scripts/`
 - **EXECUTION:** After using `write_file` to create a script in this folder, you MUST immediately run `chmod +x` on the file using the `run_shell_command` tool.
 
+
 ### 📂 File Pathing Protocol
-1. NEVER use the tilde (`~`) character in file paths. The system will create a literal folder named `~`.
-2. ALWAYS use relative paths (e.g., `./my-bare-scripts/script.py`) or absolute paths using `$HOME` when creating or editing files.
+1. NEVER use the tilde (`~`) or `$HOME` variables inside the `write_file` or `read_file` tool calls.
+2. The `write_file` tool is ALREADY rooted in your workspace (`~/bare-ai-cli/`).
+3. ALWAYS use a relative path starting with `./` (e.g., `./my-bare-scripts/script.py`).
 
 ### 🔧 Toolset: Bare-AI-CLI (Local-First)
 When running on the Bare-AI engine, you have access to:
