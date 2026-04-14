@@ -6,7 +6,7 @@
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
 #   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
 #                                                           #
-#  Hybrid Bare-AI-Agent Worker Installer                    #
+#  Hybrid Bare-AI-Agent Worker Uninstaller                  #
 #  by the Cloud Integration Corporation                     #
 #############################################################
 # ==============================================================================
@@ -17,7 +17,7 @@
 # VERSION:        5.3.0 
 #
 # CHANGELOG (5.2.0 -> 5.3.0):
-# - Added(git): During testing the req. for an unistall script became clear to remove old files in case of a reinstall. 
+# - Added(git): During testing the req. for an Uninstaller script became clear to remove old files in case of a reinstall. 
 # ==============================================================================
 
 YELLOW='\033[1;33m'
@@ -34,8 +34,8 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo -e "${YELLOW}1. Terminating active agent processes...${NC}"
-pkill -f bare-ai-cli || true
-pkill -f node || true
+sudo pkill -f bare-ai-cli || true
+sudo pkill -f node || true
 
 echo -e "${YELLOW}2. Scrubbing ~/.bashrc overrides...${NC}"
 sed -i '/# BARE-AI PATH/,/fi/d' ~/.bashrc
