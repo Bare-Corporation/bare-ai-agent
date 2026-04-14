@@ -11,11 +11,18 @@
 #############################################################
 # ==============================================================================
 # SCRIPT NAME:    setup_bare-ai-worker.sh
-# DESCRIPTION:    bare-ai-worker "Apex" Installer (Level 4 Autonomy)
+# DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
-# DATE:           2026-04-13
-# UPDATED:        2026-02-02
-# VERSION:        5.2.0-Enterprise (Dynamic Vault Routing)
+# DATE:           2026-04-14
+# VERSION:        5.3.0 (Sovereign Autonomy Edition)
+#
+# CHANGELOG (5.2.0 -> 5.3.0):
+# - fix(git): Reordered engine clone before toolkit deployment to prevent conflicts.
+# - fix(bash): Relocated BARE_NECESSITIES_DIR to fix strict 'set -u' unbound error.
+# - feat(auth): Injected BARE_AI_YOLA_MODE and DISABLE_WORKSPACE_TRUST into bare().
+# - fix(perms): Corrected find/chmod logic with \( -o \) for global execution.
+# - perf(llm): Restored .sh/.py extensions to symlinks to optimize AI token usage.
+# - ux(cli): Refined post-install terminal instructions for user clarity.
 # ==============================================================================
 set -euo pipefail
 
@@ -590,7 +597,7 @@ BARE_FUNC_EOF
 
 # --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}✅ BARE-AI WORKER SETUP COMPLETE${NC}"
+echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
@@ -600,8 +607,8 @@ if grep -q "your-role-id-here" "$HOME/.bare-ai/config/vault.env" 2>/dev/null; th
     echo -e "   Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
 fi
 
-echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc"
-echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize"
-echo -e "3. ${YELLOW}Run agent:${NC}     bare granite"
-echo -e "4. ${YELLOW}Edit role:${NC}     nano bare-role  (customise your agent personality)"
-echo -e "5. ${YELLOW}Engine type:${NC}   $ENGINE_TYPE"
+echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (req - reloads your systems ~/.bashrc with modifications.)"
+echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize (opt - used in fleet management only in conjuction with bare brain)"
+echo -e "3. ${YELLOW}Edit role:${NC}     bare-role  (opt - customise your agent personality)"
+echo -e "4. ${YELLOW}Run agent:${NC}     bare (req - or bare energy or bare loco or bare granite or bare gemma4 etc)"
+echo -e "5. ${YELLOW}Architecture:${NC}  $ENGINE_TYPE backend loaded"
