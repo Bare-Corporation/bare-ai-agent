@@ -140,6 +140,8 @@ mkdir -p "$(dirname "$VAULT_ENV_FILE")"
 
 FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 INSTALL_VAULT=false
+AGENT_ROLE_ID="your-role-id-here"
+AGENT_SECRET_ID="your-secret-id-here"
 
 read -rp "Do you have an existing HashiCorp Vault server for this agent? [y/N/unsure]: " HAS_VAULT
 if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
@@ -224,12 +226,6 @@ EOF
     FINAL_VAULT_ADDR="http://127.0.0.1:8200"
     echo -e "${GREEN}✓ Local Vault initialized and seeded! Recovery keys at ~/.bare-ai/config/vault-recovery-keys.txt${NC}"
 
-else
-    # If using existing vault, leave placeholders
-    AGENT_ROLE_ID="your-role-id-here"
-    AGENT_SECRET_ID="your-secret-id-here"
-fi
-
 # Write dynamic vault.env with CIC ASCII Art
 cat << EOF > "$VAULT_ENV_FILE"
 #############################################################
@@ -269,17 +265,40 @@ export VAULT_SECRET_ID="$AGENT_SECRET_ID"
 EOF
 echo -e "${GREEN}✓ Vault config saved pointing to $FINAL_VAULT_ADDR${NC}"
 
+
+
 # --- 1c. SOVEREIGN SEARCH SETUP ---
 echo -e "\n${YELLOW}Checking Search Engine configuration...${NC}"
-read -rp "Do you have a Sovereign Search Engine (e.g., local SearXNG) to route traffic? [y/N]: " USE_SEARCH
-if [[ "$USE_SEARCH" =~ ^[Yy]$ ]]; then
+read -rp "Do you have an existing Sovereign Search Engine (e.g., SearXNG)? [y/N/1/0]: " HAS_SEARCH
+if [[ "$HAS_SEARCH" =~ ^[Yy1]$ ]]; then
     read -rp "Enter Search URL (e.g., http://192.168.86.130:8080): " SEARCH_ADDR
     echo -e "\n# Sovereign Search Override" >> "$CONFIG_FILE"
     echo "export BARE_AI_SEARCH_URL=\"$SEARCH_ADDR\"" >> "$CONFIG_FILE"
     echo -e "${GREEN}✓ Search URL set to $SEARCH_ADDR${NC}"
 else
-    echo -e "${YELLOW}⚠️ No local search configured. Defaulting to standard search providers.${NC}"
-    echo -e "   ${GREEN}Tip:${NC} To deploy SearXNG later, run: ${YELLOW}docker run -d -p 8080:8080 searxng/searxng${NC}"
+    read -rp "Would you like to auto-install a local SearXNG instance now? [y/N]: " INSTALL_SEARCH
+    if [[ "$INSTALL_SEARCH" =~ ^[Yy1]$ ]]; then
+        echo -e "${YELLOW}Deploying local SearXNG via Docker...${NC}"
+        
+        # Check if Docker is installed, if not, install it
+        if ! command -v docker &>/dev/null; then
+            echo -e "${YELLOW}Docker not found. Installing Docker engine...${NC}"
+            execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh" "Install Docker"
+            sudo usermod -aG docker "$USER" || true
+            rm -f get-docker.sh
+        fi
+        
+        # Clean up any old container and spin up a fresh SearXNG
+        sudo docker rm -f searxng &>/dev/null || true
+        execute_command "sudo docker run -d --name searxng -p 8080:8080 -v searxng-data:/etc/searxng --restart unless-stopped searxng/searxng" "Start SearXNG Container"
+        
+        LOCAL_SEARCH_URL="http://127.0.0.1:8080"
+        echo -e "\n# Sovereign Search Override" >> "$CONFIG_FILE"
+        echo "export BARE_AI_SEARCH_URL=\"$LOCAL_SEARCH_URL\"" >> "$CONFIG_FILE"
+        echo -e "${GREEN}✓ Local SearXNG installed and routed to $LOCAL_SEARCH_URL${NC}"
+    else
+        echo -e "${YELLOW}⚠️ No local search configured. Defaulting to standard search providers.${NC}"
+    fi
 fi
 
 #####################################################
@@ -597,12 +616,13 @@ bare() {
         source "$CONFIG"
     fi
 
+    
     # Sovereign model/vault routing
     case "$MODEL" in
-        energy Tír -na ai iGPU)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
-        loco Tír -na ai CPU)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        granite4 tiny-h) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
-        gemma4 31b)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
+        energy)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
+        loco)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
+        granite) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
+        gemma4)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
         *)       export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
     esac
 
