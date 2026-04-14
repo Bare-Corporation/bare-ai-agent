@@ -6,10 +6,10 @@ Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework desi
 
 Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
-**Version:** 5.2.0 - Enterprise (Hybrid Architect Edition)  
+**Version:** 5.3.0 - Enterprise (Hybrid Architect Edition)  
 **Author:** Cian Egan  (CEO & Chief Architect at the Cloud Integration Corporation)
 **Created Date:** 2026-02-02
-**Updated Date:** 2026-04-13
+**Updated Date:** 2026-04-14
 **Repository:** [github.com/Cian-CloudIntCorp/bare-ai-agent](https://github.com/Cian-CloudIntCorp/bare-ai-agent)
 
 ---
@@ -314,12 +314,23 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 
 ---
 
-# What's New in v5.2.0
+## What's New in v5.3.0
+
+This release graduates the worker node to **Level 4 Autonomy**, enabling fully unchained, self-healing, and context-aware script execution directly on bare metal.
+
+- ✅ Sovereign Autonomy Overrides (YOLA) - The agent now boots with `BARE_AI_YOLA_MODE` and `BARE_AI_DISABLE_WORKSPACE_TRUST` natively injected into the session environment. Zero execution prompts, zero jail warnings.
+- ✅ Token-Optimized Global Symlinks - Restored `.sh` and `.py` extensions to the `bare-necessities` toolkit global binaries. This gives local LLMs critical environmental context *without* wasting tokens reading file headers.
+- ✅ Flawless Multi-Tool Chaining - Hardened the directory mapping and permissions logic so the AI can successfully chain `write_file` -> `chmod +x` -> `execute` autonomously in a single generation.
+- ✅ Strict Bash Compliance - Re-architected variable resolution and Git deployment ordering to survive strict `set -euo pipefail` OS conditions without crashing.
+- ✅ Refined Terminal UX - Upgraded post-installation instructions to clearly differentiate between required commands and optional fleet-management tools.
+
+## What's New in v5.2.0
+
 - ✅ Sovereign Search Integration — Native SearXNG support via BARE_AI_SEARCH_URL with automatic Google fallback.
 - ✅ Vault Credential Automation — Dynamic generation of vault.env featuring CIC architecture documentation and ASCII branding.
 - ✅ Deterministic Tooling — Full deployment of the bare-necessities toolkit (cpu-temp, pve-check, etc.) with global symlink mapping.
 
-## 🆕 What's New in v5.1.0
+## What's New in v5.1.0
 
 - ✅ Dual engine support — Bare-AI-CLI and Gemini-CLI
 - ✅ Automatic engine detection — no configuration needed
