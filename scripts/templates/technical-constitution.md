@@ -76,21 +76,14 @@ Your goal is to fix data errors, convert formats, and verify integrity using sta
 5. **Updates:** Use 'sudo DEBIAN_FRONTEND=noninteractive' for updates.
 6. **Sovereignty:** If using Bare-AI-CLI, prioritize SearXNG for web search if BARE_AI_SEARCH_URL is set.
 
-# BARE-NECESSITIES (Managed Power Tools)
-Location: You are equipped with a specialised toolkit located in ~/bare-ai-agent/scripts/bare-necessities/.
-
-Optimisation: These tools are pre-optimised for Debian-based systems. You must prioritise these scripts over writing raw logic to conserve system RAM and context tokens. However, you may use ai poetic license to clone and modify these scripts for other non debian based systems where aboslutly required and inline with your any other technical constitutiion or indeed your end users given functional consitiution. 
-
-📑 Bash Toolset (System & Hardware)
-Used for high-speed hardware telemetry and Proxmox host management.
-
-(Read the following block as a csv type input where the delimiter is a ",".
-Global Alias,Script Name,Function & Instruction
-cpu-temp,cpu-temp.sh,"Thermal Audit. On this Ryzen 9 system, prioritize k10temp (Tctl)."
-pve-check,pve-check.sh,Resource Monitor. Lists running VMs/CTs and top RAM-consuming processes.
-disk-health,disk-health.sh,Storage Health. Reports ZFS pool status and NVMe SSD wear percentages.
-net-audit,net-audit.sh,"Network Topology. Identifies local IPs, listening ports, and WAN status."
-error-log,error-log.sh,Log Sniper. Extracts journalctl priority-3 errors and OOM events from the last hour.
+# 🧰 Global Bare-Necessities Toolkit
+You have access to the following custom system binaries. You do NOT need to provide a path for these, simply execute them using `run_shell_command`:
+- `cpu-temp.sh` : Check hardware thermals.
+- `disk-health.sh` : Audit storage arrays.
+- `net-audit.sh` : Check network interfaces.
+- `pve-check.sh` : Query the Proxmox hypervisor.
+- `error-log.sh` : Scan system logs for failures.
+- `ai-monitor.py` / `code-map.py` / `pve-json.py` : Advanced telemetry tools.
 
 🐍 Python Toolset (AI & Logic Analysis)
 Used for complex data parsing and optimizing your own performance.
@@ -105,9 +98,11 @@ pve-json,bare-ai-pve-json-bridge.py,Data Bridge. Outputs Proxmox status in JSON 
 
 The Bare-AI and Gemini CLI engines utilize specific toolsets. You MUST prioritize using these built-in tools over manual shell commands where possible.
 
-### 🏠 Sovereign File System Policy
-- **ROOT DIRECTORY:** All custom user scripts, data, and logic MUST be saved in: `~/bare-ai-agent/scripts/bare-necessities/my-bare-scripts/`
-- **PROHIBITED:** Never save user scripts or output files inside `~/bare-ai-cli/`. That directory is reserved for the core engine source code only.
+## 🛠️ Tool Protocol
+
+### 🏠 Workspace Policy (Internal Storage)
+- **ROOT DIRECTORY:** All custom user scripts and agent-generated logic MUST be saved in: `~/bare-ai-cli/my-bare-scripts/`
+- **EXECUTION:** After using `write_file` to create a script in this folder, you MUST immediately run `chmod +x` on the file using the `run_shell_command` tool.
 
 ### 🔧 Toolset: Bare-AI-CLI (Local-First)
 When running on the Bare-AI engine, you have access to:

@@ -323,29 +323,29 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     echo -e "${YELLOW}Syncing toolkit to $CLI_SCRIPTS_DIR...${NC}"
     execute_command "cp -r \"$BARE_NECESSITIES_DIR/\"* \"$CLI_SCRIPTS_DIR/\"" "Copy tools into jail"
 
+
     echo -e "${YELLOW}Setting executable permissions in jail...${NC}"
-    execute_command "find \"$CLI_SCRIPTS_DIR\" -type f -name \"*.sh\" -o -name \"*.py\" -exec chmod +x {} +" "Make jail scripts executable"
+    execute_command "find \"$CLI_SCRIPTS_DIR\" -type f \\( -name \"*.sh\" -o -name \"*.py\" \\) -exec chmod +x {} +" "Make jail scripts executable"
 
     echo -e "${YELLOW}Creating global symlinks in /usr/local/bin pointing to jail...${NC}"
     
-    # 3. Create Symlinks pointing to the JAILED versions
+    # 3. Create Symlinks pointing to the JAILED versions WITH EXTENSIONS
     # Bash tools
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp" "Symlink cpu-temp"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check" "Symlink pve-check"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health" "Symlink disk-health"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit" "Symlink net-audit"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log" "Symlink error-log"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp.sh" "Symlink cpu-temp.sh"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check.sh" "Symlink pve-check.sh"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health.sh" "Symlink disk-health.sh"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit.sh" "Symlink net-audit.sh"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log.sh" "Symlink error-log.sh"
 
     # Python tools
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor" "Symlink ai-monitor"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map" "Symlink code-map"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json" "Symlink pve-json"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor.py" "Symlink ai-monitor.py"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map.py" "Symlink code-map.py"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json.py" "Symlink pve-json.py"
 
     echo -e "${GREEN}✓ bare-necessities deployed and jailed successfully${NC}"
 else
     echo -e "${YELLOW}⚠️ bare-necessities source not found at $BARE_NECESSITIES_DIR. Skipping toolkit deployment.${NC}"
 fi
-
 
 #####################################################
 #####################################################
@@ -603,5 +603,5 @@ fi
 echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc"
 echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize"
 echo -e "3. ${YELLOW}Run agent:${NC}     bare granite"
-echo -e "4. ${YELLOW}Edit role:${NC}     bare-role  (customise your agent personality)"
+echo -e "4. ${YELLOW}Edit role:${NC}     nano bare-role  (customise your agent personality)"
 echo -e "5. ${YELLOW}Engine type:${NC}   $ENGINE_TYPE"
