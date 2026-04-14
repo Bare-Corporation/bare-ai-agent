@@ -225,6 +225,7 @@ EOF
 
     FINAL_VAULT_ADDR="http://127.0.0.1:8200"
     echo -e "${GREEN}✓ Local Vault initialized and seeded! Recovery keys at ~/.bare-ai/config/vault-recovery-keys.txt${NC}"
+fi
 
 # Write dynamic vault.env with CIC ASCII Art
 cat << EOF > "$VAULT_ENV_FILE"
