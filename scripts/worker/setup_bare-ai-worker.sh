@@ -588,6 +588,7 @@ bare() {
 alias bare-status='echo "🔍 Local Telemetry Audit:"; bare-summarize | jq .'
 alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
+alias bare-uninstall="$AGENT_DIR/scripts/worker/uninstall_bare-ai.sh"
 BARE_FUNC_EOF
     echo -e "${GREEN}✓ bare() function added to .bashrc${NC}"
 
@@ -602,13 +603,14 @@ echo -e "${GREEN}═════════════════════
 
 # 10.a Check if Vault needs configuration
 if grep -q "your-role-id-here" "$HOME/.bare-ai/config/vault.env" 2>/dev/null; then
-    echo -e "${RED}⚠️  ACTION REQUIRED: Vault Credentials Missing!${NC}"
-    echo -e "${YELLOW}   You must add your real Role ID and Secret ID before running the agent.${NC}"
-    echo -e "   Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
+echo -e "${RED}⚠️  ACTION REQUIRED: Vault Credentials Missing!${NC}"
+echo -e "${YELLOW}   You must add your real Role ID and Secret ID before running the agent.${NC}"
+echo -e "0. Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
 fi
 
-echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (req - reloads your systems ~/.bashrc with modifications.)"
-echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize (opt - used in fleet management only in conjuction with bare brain)"
-echo -e "3. ${YELLOW}Edit role:${NC}     bare-role  (opt - customise your agent personality)"
-echo -e "4. ${YELLOW}Run agent:${NC}     bare (req - or bare energy or bare loco or bare granite or bare gemma4 etc)"
-echo -e "5. ${YELLOW}Architecture:${NC}  $ENGINE_TYPE backend loaded"
+echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your systems ~/.bashrc with modifications.)"
+echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
+echo -e "3. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
+echo -e "4. ${GREEN}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
+echo -e "5. ${YELLOW}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
+echo -e "6. ${RED}Uninstall:${NC}        bare-uninstall (<< opt - Runs script to purge agent/cli.)"
