@@ -13,18 +13,33 @@
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
-# DATE:           2026-04-14
-# VERSION:        5.3.0 (Sovereign Autonomy Edition)
+# DATE:           2026-04-15
+# VERSION:        5.5.0 (Sovereign Autonomy Edition)
 #
-# CHANGELOG (5.2.0 -> 5.3.0):
-# - fix(git): Reordered engine clone before toolkit deployment to prevent conflicts.
-# - fix(bash): Relocated BARE_NECESSITIES_DIR to fix strict 'set -u' unbound error.
-# - feat(auth): Injected BARE_AI_YOLA_MODE and DISABLE_WORKSPACE_TRUST into bare().
-# - fix(perms): Corrected find/chmod logic with \( -o \) for global execution.
-# - perf(llm): Restored .sh/.py extensions to symlinks to optimize AI token usage.
-# - ux(cli): Refined post-install terminal instructions for user clarity.
+# -  v5.5.0 (Sovereign Switchboard Edition)
+# - feat(menu): Expanded Sovereign Menu to support Premium Cloud multi-tenant routing.
+# - fix(routing): Added strict conditional menu rendering to prevent Gemini-CLI crashes.
+# -  v5.4.0 (Sovereign Autonomy Edition)
+# - feat(core): Implemented `--fast` flag in worker setup to bypass NPM builds.
+# - feat(identity): Unified system prompt injection via concatenating constitutions.
+# - fix(vault): Corrected syntax error and IP formatting for Tir-Na-AI iGPU.
+# ============================================================================== 
+#
+# -  v5.4.0 (Sovereign Autonomy Edition)
+# - feat(core): Implemented `--fast` flag in worker setup to bypass NPM builds for rapid ~3s fleet deployment.
+# - feat(identity): Unified system prompt injection; Bash wrapper now dynamically concatenates technical-constitution.md and      #  - role.md into $BARE_AI_SYSTEM_PROMPT at runtime.
+# - fix(routing): Resolved "Self-Healing" persona hardcode override by ensuring Sovereign Engine respects dynamic environment     #    variables.
+# - feat(models): Promoted Alibaba Qwen 2.5 Coder (32B) to primary Doer role, replacing IBM Granite 3.3.
+# - fix(vault): Corrected syntax error and IP formatting for Tir-Na-AI iGPU Vulkan endpoints.
+# - feat(ux): Enforced "Liege" protocol in base technical constitution for standardized node responses.
 # ==============================================================================
 set -euo pipefail
+# --- FAST UPDATE CHECK ---
+FAST_UPDATE=false
+if [[ "${1:-}" == "--fast" ]]; then
+    FAST_UPDATE=true
+    echo -e "\033[1;33mFAST MODE: Skipping engine rebuild. Updating Brain & Menu only...\033[0m"
+fi
 
 # --- DOCKER / Podman WARNING ---
 if [ ! -f "/.dockerenv" ]; then
@@ -220,6 +235,18 @@ EOF
     vault kv put secret/granite4:tiny-h/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
     vault kv put secret/deepseek-r1:8b/config base_url="http://127.0.0.1:11434" model_name="deepseek-r1:8b" api_key="local" > /dev/null
 
+    vault kv put secret/gemini-2.5-flash-lite/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-flash-lite" api_key="local" > /dev/null
+    vault kv put secret/gemini-2.5-flash/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-flash" api_key="local" > /dev/null
+    vault kv put secret/gemini-2.5-pro/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-pro" api_key="local" > /dev/null
+    vault kv put secret/gemini-3-flash-preview/config base_url="http://127.0.0.1:11434" model_name="gemini-3-flash-preview" api_key="local" > /dev/null
+    vault kv put secret/gemini-3.1-pro-preview/config base_url="http://127.0.0.1:11434" model_name="gemini-3.1-pro-preview" api_key="local" > /dev/null
+    vault kv put secret/claude-3-5-sonnet/config base_url="http://127.0.0.1:11434" model_name="claude-3-5-sonnet" api_key="local" > /dev/null
+    vault kv put secret/claude-3-opus/config base_url="http://127.0.0.1:11434" model_name="claude-3-opus" api_key="local" > /dev/null
+    vault kv put secret/gpt-4o/config base_url="http://127.0.0.1:11434" model_name="gpt-4o" api_key="local" > /dev/null
+    vault kv put secret/gpt-4-turbo/config base_url="http://127.0.0.1:11434" model_name="gpt-4-turbo" api_key="local" > /dev/null
+    vault kv put secret/o1-preview/config base_url="http://127.0.0.1:11434" model_name="o1-preview" api_key="local" > /dev/null
+    
+
     # 10. Extract IDs for the Agent
     AGENT_ROLE_ID=$(vault read -field=role_id auth/approle/role/bare-ai-role/role-id)
     AGENT_SECRET_ID=$(vault write -f -field=secret_id auth/approle/role/bare-ai-role/secret-id)
@@ -336,61 +363,66 @@ execute_command "chmod +x \"$DEST_BIN\"" "Make bare-summarize executable"
 #####################################################
 #####################################################
 
-if [ "$ENGINE_CHOICE" == "1" ]; then
-    echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
+# --- 3. ENGINE INSTALLATION ---
+if [ "$FAST_UPDATE" = false ]; then
+    if [ "$ENGINE_CHOICE" == "1" ]; then
+        echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
 
-    # Ensure npm is available and up to date before attempting build
-    # npm 9.x has a known bug with npm: alias in overrides - requires npm 10+
-    if ! command -v npm &>/dev/null; then
-        echo -e "${YELLOW}npm not found. Installing Node.js and npm...${NC}"
-        execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq nodejs npm" "Install Node.js and npm"
-    fi
+        # Ensure npm is available and up to date before attempting build
+        # npm 9.x has a known bug with npm: alias in overrides - requires npm 10+
+        if ! command -v npm &>/dev/null; then
+            echo -e "${YELLOW}npm not found. Installing Node.js and npm...${NC}"
+            execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq nodejs npm" "Install Node.js and npm"
+        fi
 
-    NPM_MAJOR=$(npm --version 2>/dev/null | cut -d. -f1)
-    if [ "${NPM_MAJOR:-0}" -lt 10 ]; then
-        echo -e "${YELLOW}npm version too old ($(npm --version)). Upgrading via n...${NC}"
-        execute_command "sudo npm install -g n" "Install n (node version manager)"
-        execute_command "sudo n stable" "Upgrade Node.js to stable"
-        hash -r 2>/dev/null || true
-        echo -e "${GREEN}✓ Node.js and npm upgraded (npm $(npm --version))${NC}"
+        NPM_MAJOR=$(npm --version 2>/dev/null | cut -d. -f1)
+        if [ "${NPM_MAJOR:-0}" -lt 10 ]; then
+            echo -e "${YELLOW}npm version too old ($(npm --version)). Upgrading via n...${NC}"
+            execute_command "sudo npm install -g n" "Install n (node version manager)"
+            execute_command "sudo n stable" "Upgrade Node.js to stable"
+            hash -r 2>/dev/null || true
+            echo -e "${GREEN}✓ Node.js and npm upgraded (npm $(npm --version))${NC}"
+        else
+            echo -e "${GREEN}✓ npm $(npm --version) - OK${NC}"
+        fi
+
+        if [ ! -d "$CLI_REPO_DIR" ]; then
+            echo -e "${YELLOW}CLI not found. Cloning sovereign engine from GitHub...${NC}"
+            execute_command "git clone https://github.com/Cian-CloudIntCorp/bare-ai-cli.git \"$CLI_REPO_DIR\"" "Clone Bare-AI-CLI"
+        else
+            echo -e "${GREEN}Existing CLI found. Pulling latest...${NC}"
+            execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
+        fi
+
+        execute_command "cd \"$CLI_REPO_DIR\" && npm install && npm run build && npm run bundle" "Build Sovereign Engine"
+        ENGINE_TYPE="sovereign"
+
     else
-        echo -e "${GREEN}✓ npm $(npm --version) - OK${NC}"
-    fi
+        echo -e "${YELLOW}Configuring Gemini-CLI...${NC}"
 
-    if [ ! -d "$CLI_REPO_DIR" ]; then
-        echo -e "${YELLOW}CLI not found. Cloning sovereign engine from GitHub...${NC}"
-        execute_command "git clone https://github.com/Cian-CloudIntCorp/bare-ai-cli.git \"$CLI_REPO_DIR\"" "Clone Bare-AI-CLI"
-    else
-        echo -e "${GREEN}Existing CLI found. Pulling latest...${NC}"
-        execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
-    fi
+        if ! command -v gemini &>/dev/null; then
+            echo -e "${RED}Gemini CLI not found.${NC}"
 
-    execute_command "cd \"$CLI_REPO_DIR\" && npm install && npm run build && npm run bundle" "Build Sovereign Engine"
-    ENGINE_TYPE="sovereign"
-
-else
-    echo -e "${YELLOW}Configuring Gemini-CLI...${NC}"
-
-    if ! command -v gemini &>/dev/null; then
-        echo -e "${RED}Gemini CLI not found.${NC}"
-
-        if command -v npm &>/dev/null; then
-            echo -e "${YELLOW}Installing @google/gemini-cli via npm...${NC}"
-            if execute_command "sudo npm install -g @google/gemini-cli" "Install Gemini CLI globally"; then
-                echo -e "${GREEN}✓ Gemini CLI installed${NC}"
+            if command -v npm &>/dev/null; then
+                echo -e "${YELLOW}Installing @google/gemini-cli via npm...${NC}"
+                if execute_command "sudo npm install -g @google/gemini-cli" "Install Gemini CLI globally"; then
+                    echo -e "${GREEN}✓ Gemini CLI installed${NC}"
+                else
+                    echo -e "${RED}Failed to install Gemini CLI. Ensure npm is available and you have sudo rights.${NC}"
+                    exit 1
+                fi
             else
-                echo -e "${RED}Failed to install Gemini CLI. Ensure npm is available and you have sudo rights.${NC}"
+                echo -e "${RED}npm not found. Cannot install Gemini CLI. Exiting.${NC}"
                 exit 1
             fi
         else
-            echo -e "${RED}npm not found. Cannot install Gemini CLI. Exiting.${NC}"
-            exit 1
+            echo -e "${GREEN}✓ Gemini CLI already installed${NC}"
         fi
-    else
-        echo -e "${GREEN}✓ Gemini CLI already installed${NC}"
-    fi
 
-    ENGINE_TYPE="cloud"
+        ENGINE_TYPE="cloud"
+    fi
+else
+    echo -e "${GREEN}✓ Skipping engine build (Fast Update active)${NC}"
 fi
 
 #####################################################
@@ -584,41 +616,82 @@ bare() {
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
 
-    # --- INTERACTIVE MODEL MENU ---
-    if [ -z "$MODEL" ]; then
-        echo -e "\n\033[1;36m===================================================\033[0m"
-        echo -e "\033[1;36m🤖 BARE-AI Sovereign Engine Selection\033[0m"
-        echo -e "\033[1;36m===================================================\033[0m"
-        echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
-        echo -e "   1) DeepSeek R1 (8B)        [deepseek-r1:8b]"
-        echo -e "   2) Tir-Na-AI (8B)          [tir-na-ai:latest]"
-        echo -e "   3) Gemma 4 (E4B Edge)      [gemma4:e4b]"
-        echo -e "   4) Gemma 4 (26B MOE)       [gemma4:26b]"
-        echo -e "   5) Gemma 4 (31B Heavy)     [gemma4:31b]"
-        echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
-        echo -e "   6) Granite 4 (Tiny)        [granite4:tiny-h]"
-        echo -e "   7) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
-        echo -e "   8) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
-        echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
-        echo -e "   9) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
-        echo -e "---------------------------------------------------"
-        
-        read -rp "Select a model [1-9]: " menu_choice
-        case "$menu_choice" in
-            1) MODEL="deepseek-r1:8b" ;;
-            2) MODEL="tir-na-ai:latest" ;;
-            3) MODEL="gemma4:e4b" ;;
-            4) MODEL="gemma4:26b" ;;
-            5) MODEL="gemma4:31b" ;;
-            6) MODEL="granite4:tiny-h" ;;
-            7) MODEL="qwen2.5-coder:32b" ;;
-            8) MODEL="deepseek-coder-v2:latest" ;;
-            9) MODEL="tir-na-ai:iGPU" ;;
-            *) echo -e "\033[0;31mInvalid selection. Aborting.\033[0m"; return 1 ;;
-        esac
-        echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
+    # Load engine type from config
+    local ENGINE_TYPE="cloud"
+    if [ -f "$CONFIG" ]; then
+        source "$CONFIG"
     fi
 
+
+    # --- INTERACTIVE MODEL MENU ---
+    if [ -z "$MODEL" ]; then
+        if [ "$ENGINE_TYPE" = "sovereign" ]; then
+        echo -e "\n\033[1;36m===================================================\033[0m"
+        echo -e "\033[1;36m🔱🤖  BARE-AI Sovereign Free Engine Selection\033[0m"
+        echo -e "\033[1;36m===================================================\033[0m"
+        echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
+        echo -e "   001) DeepSeek R1 (8B)        [deepseek-r1:8b]"
+        echo -e "   002) Tir-Na-AI (8B)          [tir-na-ai:latest]"
+        echo -e "   003) Gemma 4 (E4B Edge)      [gemma4:e4b]"
+        echo -e "   004) Gemma 4 (26B MOE)       [gemma4:26b]"
+        echo -e "   005) Gemma 4 (31B Heavy)     [gemma4:31b]"
+        echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
+        echo -e "   006) Granite 4 (Tiny)        [granite4:tiny-h]"
+        echo -e "   007) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
+        echo -e "   008) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
+        echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
+        echo -e "   009) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
+        echo -e "---------------------------------------------------"
+
+                echo -e "\n\033[1;35m===================================================\033[0m"
+        echo -e "\033[1;35m⭐🤖 BARE-AI Sovereign PREMIUM Engine Selection\033[0m"
+        echo -e "\033[1;35m===================================================\033[0m"
+        echo -e " [The Gemini Constellation]"
+        echo -e "   101) Gemini 2.5 Flash Lite  [gemini-2.5-flash-lite]"
+        echo -e "   102) Gemini 2.5 Flash       [gemini-2.5-flash]"
+        echo -e "   103) Gemini 2.5 Pro         [gemini-2.5-pro]"
+        echo -e "   104) Gemini 3 Flash (Pre)   [gemini-3-flash-preview]"
+        echo -e "   105) Gemini 3.1 Pro (Pre)   [gemini-3.1-pro-preview]"
+        echo -e " [The Claude Estate]"
+        echo -e "   151) Claude 3.5 Sonnet      [claude-3-5-sonnet]"
+        echo -e "   152) Claude 3 Opus (Heavy)  [claude-3-opus]"
+        echo -e " [The GPT Nexus]"
+        echo -e "   201) GPT-4o (Omni)          [gpt-4o]"
+        echo -e "   202) GPT-4-Turbo            [gpt-4-turbo]"
+        echo -e "   203) o1-preview (Reasoning) [o1-preview]"
+        echo -e "---------------------------------------------------"
+
+                read -rp "Select a model code [001-203]: " menu_choice
+        case "$menu_choice" in
+            001) MODEL="deepseek-r1:8b" ;;
+            002) MODEL="tir-na-ai:latest" ;;
+            003) MODEL="gemma4:e4b" ;;
+            004) MODEL="gemma4:26b" ;;
+            005) MODEL="gemma4:31b" ;;
+            006) MODEL="granite4:tiny-h" ;;
+            007) MODEL="qwen2.5-coder:32b" ;;
+            008) MODEL="deepseek-coder-v2:latest" ;;
+            009) MODEL="tir-na-ai:iGPU" ;;
+            101) MODEL="gemini-2.5-flash-lite" ;;
+            102) MODEL="gemini-2.5-flash" ;;
+            103) MODEL="gemini-2.5-pro" ;;
+            104) MODEL="gemini-3-flash-preview" ;;
+            105) MODEL="gemini-3.1-pro-preview" ;;
+            151) MODEL="claude-3-5-sonnet" ;;
+            152) MODEL="claude-3-opus" ;;
+            201) MODEL="gpt-4o" ;;
+            202) MODEL="gpt-4-turbo" ;;
+            203) MODEL="o1-preview" ;;
+            *) echo -e "\033[0;31mInvalid code. Aborting.\033[0m"; return 1 ;;
+        esac
+        echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
+
+        else
+            # Default fallback for Standard Gemini CLI
+            MODEL="gemini-2.5-flash-lite"
+        fi
+    fi
+        
     # Load Vault credentials dynamically (This securely sets VAULT_ADDR)
     if [ -f "$VAULT_ENV" ]; then
         source "$VAULT_ENV" 2>/dev/null || true
@@ -635,14 +708,8 @@ bare() {
     if [ ! -f "$ROLE_CONST" ]; then
         echo -e "\033[1;33mWarning: No role constitution at $ROLE_CONST — running with technical only.\033[0m"
     fi
-
-    # Load engine type from config
-    local ENGINE_TYPE="cloud"
-    if [ -f "$CONFIG" ]; then
-        source "$CONFIG"
-    fi
     
-    # Sovereign model/vault routing
+    # BARE-AI Sovereign Free Engine model/vault routing
     case "$MODEL" in
         tir-na-ai:latest)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:latest/config"; export BARE_AI_NO_TOOLS="true"  ;;
         gemma4:31b)               export VAULT_SECRET_PATH="secret/data/gemma4:31b/config";     export BARE_AI_NO_TOOLS="false" ;;
@@ -653,7 +720,21 @@ bare() {
         deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/deepseek-r1:8b/config"; export BARE_AI_NO_TOOLS="true"  ;;
         deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/deepseek-coder-v2:latest/config"; export BARE_AI_NO_TOOLS="true" ;;
         tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:iGPU/config"; export BARE_AI_NO_TOOLS="true" ;;
-        *)                        export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="true" ;;
+
+    
+    # BARE-AI Sovereign Premium Engine model/vault routing
+        gemini-2.5-flash-lite)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-flash-lite/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-2.5-flash)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-flash/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-2.5-pro)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-pro/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-3-flash-preview)  export VAULT_SECRET_PATH="secret/data/gemini-3-flash-preview/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-3.1-pro-preview)  export VAULT_SECRET_PATH="secret/data/gemini-3.1-pro-preview/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        claude-3.5-sonnet) export VAULT_SECRET_PATH="secret/data/claude-3.5-sonnet/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        claude-3-opus) export VAULT_SECRET_PATH="secret/data/claude-3-opus/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        gpt-4o) export VAULT_SECRET_PATH="secret/data/gpt-4o/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        gpt-4-turbo) export VAULT_SECRET_PATH="secret/data/gpt-4-turbo/config" ; export BARE_AI_NO_TOOLS="false" ;;
+        o1-preview) export VAULT_SECRET_PATH="secret/data/o1-preview/config" ; export BARE_AI_NO_TOOLS="true" ;;
+        *)                 export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
+        
     esac
 
     # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
@@ -664,6 +745,7 @@ bare() {
     export BARE_AI_CONSTITUTION="$TECH_CONST"
     export BARE_AI_ROLE_CONSTITUTION="$ROLE_CONST"
     export BARE_AI_DIARY="$DIARY"
+
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
@@ -682,6 +764,10 @@ bare() {
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
                 
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@"
+
+
+##########################
+        ##################
         # Log forwarding
         if [ -f "BARE.md" ]; then
             echo -e "\n--- SESSION APPENDED: $(date) [bare-ai | $MODEL] ---" >> "$DIARY"
@@ -689,14 +775,15 @@ bare() {
             rm "BARE.md"
             echo -e "\033[0;32m📝 Session saved to Diary ($TODAY.md)\033[0m"
         fi
+
     else
-        echo -e "\033[1;33m✨ [Engine: Gemini CLI | Model: gemini-2.5-flash-lite]\033[0m"
+        echo -e "\033[1;33m✨ [Engine: Gemini CLI | Model: $MODEL]\033[0m"
         local combined_const
         combined_const=$(sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST")
         if [ -f "$ROLE_CONST" ]; then
             combined_const="${combined_const}"$'\n\n---\n\n'"$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")"
         fi
-        gemini -m gemini-2.5-flash-lite -i "$combined_const" "$@"
+        gemini -m "$MODEL" -i "$combined_const" "$@"
         # Log forwarding
         if [ -f "GEMINI.md" ]; then
             echo -e "\n--- SESSION APPENDED: $(date) [gemini] ---" >> "$DIARY"
@@ -711,6 +798,7 @@ alias bare-status='echo "🔍 Local Telemetry Audit:"; bare-summarize | jq .'
 alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
 alias bare-uninstall='~/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
+alias bare-update='cd ~/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
