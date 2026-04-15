@@ -25,10 +25,16 @@
 # - ux(cli): Refined post-install terminal instructions for user clarity.
 # ==============================================================================
 set -euo pipefail
+# --- FAST UPDATE CHECK ---
+FAST_UPDATE=false
+if [[ "${1:-}" == "--fast" ]]; then
+    FAST_UPDATE=true
+    echo -e "${YELLOW}Running in FAST UPDATE mode. Skipping engine build...${NC}"
+fi
 
-# --- DOCKER WARNING ---
+# --- DOCKER / Podman WARNING ---
 if [ ! -f "/.dockerenv" ]; then
-    echo -e "\033[1;33mWarning: Running on host system. For enhanced security, Bare-ERP recommends running within Docker.\033[0m"
+    echo -e "\033[1;33mWarning: Running on host system. For enhanced security, Bare-ERP recommends running within Docker or Podman.\033[0m"
 fi
 
 # --- COLORS ---
@@ -336,7 +342,6 @@ execute_command "chmod +x \"$DEST_BIN\"" "Make bare-summarize executable"
 #####################################################
 #####################################################
 
-# --- 3. ENGINE INSTALLATION ---
 if [ "$ENGINE_CHOICE" == "1" ]; then
     echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
 
@@ -667,11 +672,21 @@ bare() {
     export BARE_AI_DIARY="$DIARY"
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
+        # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
+        local combined_const
+        combined_const=$(cat "$TECH_CONST")
+        if [ -f "$ROLE_CONST" ]; then
+            combined_const="${combined_const}"$'\n\n### ROLE & MISSION ###\n\n'"$(cat "$ROLE_CONST")"
+        fi
+        
+        # Replace the date placeholder
+        combined_const=$(echo "$combined_const" | sed "s|{{DATE}}|$TODAY|g")
+
+        # Force the CLI to use this combined string
+        export BARE_AI_SYSTEM_PROMPT="$combined_const"
+
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
-        
-        # Safely remove the model name ONLY if arguments exist and matched the menu selection
-        if [ $# -gt 0 ] && [ "$1" = "$MODEL" ]; then shift; fi
-        
+                
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@"
         # Log forwarding
         if [ -f "BARE.md" ]; then

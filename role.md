@@ -1,0 +1,1 @@
+/home/cianegan/.bare-ai/role.md
