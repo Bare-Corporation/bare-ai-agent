@@ -556,9 +556,12 @@ echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
 #####################################################
 #####################################################
 
+
 # 9a. PATH entry
 if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
     cat << 'PATH_EOF' >> "$BASHRC_FILE"
+
+# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 
 # BARE-AI PATH
 if [ -d "$HOME/.bare-ai/bin" ] ; then
@@ -570,13 +573,7 @@ else
     echo -e "${YELLOW}⚠️  PATH entry already present, skipping${NC}"
 fi
 
-#####################################################
-#####################################################
-#####################################################
-
 cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
-
-# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 
 # BARE-AI Hybrid Loader
 bare() {
@@ -595,25 +592,29 @@ bare() {
         echo -e "\033[1;36m===================================================\033[0m"
         echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
         echo -e "   1) DeepSeek R1 (8B)        [deepseek-r1:8b]"
-        echo -e "   2) Gemma 4 (E4B Edge)      [gemma4:e4b]"
-        echo -e "   3) Gemma 4 (31B Heavy)     [gemma4:31b]"
+        echo -e "   2) Tir-Na-AI (8B)          [tir-na-ai:latest]"
+        echo -e "   3) Gemma 4 (E4B Edge)      [gemma4:e4b]"
+        echo -e "   4) Gemma 4 (26B MOE)       [gemma4:26b]"
+        echo -e "   5) Gemma 4 (31B Heavy)     [gemma4:31b]"
         echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
-        echo -e "   4) Granite 4 (Tiny)        [granite4:tiny-h]"
-        echo -e "   5) Granite 3.3 (8B)        [granite3.3:8b]"
-        echo -e "   6) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
+        echo -e "   6) Granite 4 (Tiny)        [granite4:tiny-h]"
+        echo -e "   7) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
+        echo -e "   8) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
         echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
-        echo -e "   7) Tir-Na-AI Fast          [tir-na-ai-fast]"
+        echo -e "   9) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
         echo -e "---------------------------------------------------"
         
-        read -rp "Select a model [1-7]: " menu_choice
+        read -rp "Select a model [1-9]: " menu_choice
         case "$menu_choice" in
             1) MODEL="deepseek-r1:8b" ;;
-            2) MODEL="gemma4:e4b" ;;
-            3) MODEL="gemma4:31b" ;;
-            4) MODEL="granite4:tiny-h" ;;
-            5) MODEL="granite3.3:8b" ;;
-            6) MODEL="deepseek-coder-v2:latest" ;;
-            7) MODEL="tir-na-ai-fast" ;;
+            2) MODEL="tir-na-ai:latest" ;;
+            3) MODEL="gemma4:e4b" ;;
+            4) MODEL="gemma4:26b" ;;
+            5) MODEL="gemma4:31b" ;;
+            6) MODEL="granite4:tiny-h" ;;
+            7) MODEL="qwen2.5-coder:32b" ;;
+            8) MODEL="deepseek-coder-v2:latest" ;;
+            9) MODEL="tir-na-ai:iGPU" ;;
             *) echo -e "\033[0;31mInvalid selection. Aborting.\033[0m"; return 1 ;;
         esac
         echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
@@ -644,14 +645,16 @@ bare() {
     
     # Sovereign model/vault routing
     case "$MODEL" in
-        tir-na-ai-fast)           export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
+        tir-na-ai:latest)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:latest/config"; export BARE_AI_NO_TOOLS="true"  ;;
         gemma4:31b)               export VAULT_SECRET_PATH="secret/data/gemma4:31b/config";     export BARE_AI_NO_TOOLS="false" ;;
+        gemma4:26b)               export VAULT_SECRET_PATH="secret/data/gemma4:26b/config";     export BARE_AI_NO_TOOLS="false" ;;
         gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/gemma4:e4b/config";     export BARE_AI_NO_TOOLS="false" ;;
         granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/granite4:tiny-h/config";export BARE_AI_NO_TOOLS="false" ;;
-        granite3.3:8b)            export VAULT_SECRET_PATH="secret/data/granite3.3:8b/config";  export BARE_AI_NO_TOOLS="false" ;;
+        qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/qwen2.5-coder:32b/config"; export BARE_AI_NO_TOOLS="false" ;;
         deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/deepseek-r1:8b/config"; export BARE_AI_NO_TOOLS="true"  ;;
         deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/deepseek-coder-v2:latest/config"; export BARE_AI_NO_TOOLS="false" ;;
-        *)                        export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
+        tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:iGPU/config"; export BARE_AI_NO_TOOLS="true" ;;
+        *)                        export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="true" ;;
     esac
 
     # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
