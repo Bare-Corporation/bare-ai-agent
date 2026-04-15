@@ -314,6 +314,31 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 
 ---
 
+## What's New in v5.5.0
+
+This release introduces the Sovereign Switchboard, seamlessly bridging the gap between zero-cost local execution and premium cloud intelligence while maintaining strict operational isolation.
+
+- ✅ Premium Cloud Multi-Tenant Routing - Expanded the Sovereign Menu with a 3-digit switchboard to support distinct 1:1 Vault secret paths for granular billing and access control across Google, Anthropic, and OpenAI models.
+
+- ✅ Dual-Engine Conditional Rendering - Implemented strict execution wrappers to isolate the comprehensive Sovereign menu from the standard Gemini CLI, completely preventing execution crashes when switching backends.
+
+- ✅ Standardized Tool-State Awareness - Hardcoded precise tool-use flags (true/false) across all 19 model endpoints, ensuring only capable "Doer" or reasoning models attempt function calling.
+
+## What's New in v5.4.0
+This release focuses on rapid fleet management and unified identity protocols, solidifying the agent's core operational logic and upgrading the default model hierarchy.
+
+- ✅ Rapid Fleet Deployment - Introduced the --fast flag in the worker setup to bypass NPM rebuilds, enabling lightning-fast (~3s) configuration and menu updates across all active nodes.
+
+- ✅ Unified Identity Injection - The Bash wrapper now dynamically concatenates both technical-constitution.md and role.md into the $BARE_AI_SYSTEM_PROMPT at runtime for flawless persona and rule adherence.
+
+- ✅ Dynamic Persona Resolution - Resolved the "Self-Healing" persona hardcode override by ensuring the Sovereign Engine strictly respects injected dynamic environment variables over static defaults.
+
+- ✅ Next-Gen "Doer" Promotion - Elevated Alibaba Qwen 2.5 Coder (32B) to the primary Doer role, officially replacing IBM Granite 3.3 for advanced local tool execution and coding tasks.
+
+- ✅ iGPU Vulkan Hardening - Corrected Vault syntax and IP formatting specifically targeting the Tir-Na-AI iGPU endpoints to ensure stable Vulkan acceleration.
+
+- ✅ "Liege" UX Enforcement - Standardized node responses across the fleet by embedding the "Liege" protocol directly into the base technical constitution.
+
 ## What's New in v5.3.0
 
 This release graduates the worker node to **Level 4 Autonomy**, enabling fully unchained, self-healing, and context-aware script execution directly on bare metal.
