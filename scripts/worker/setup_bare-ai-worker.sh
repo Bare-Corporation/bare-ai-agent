@@ -574,26 +574,50 @@ fi
 #####################################################
 #####################################################
 
-# 9b. bare() hybrid loader function
-# Clean out old BARE-AI Hybrid Loader block to ensure fresh injection
-if grep -q "# BARE-AI Hybrid Loader" "$BASHRC_FILE"; then
-    echo -e "${YELLOW}Removing legacy bare() function to apply updates...${NC}"
-    # Use sed to delete everything between the marker and the alias block
-    sed -i '/# BARE-AI Hybrid Loader/,/^alias bare-constitution/d' "$BASHRC_FILE"
-
-fi
-
 cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
+
+# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 
 # BARE-AI Hybrid Loader
 bare() {
-    local MODEL="${1:-granite}"
+    local MODEL="$1"
     local TODAY=$(date +%Y-%m-%d)
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
     local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
+
+    # --- INTERACTIVE MODEL MENU ---
+    if [ -z "$MODEL" ]; then
+        echo -e "\n\033[1;36m===================================================\033[0m"
+        echo -e "\033[1;36m🤖 BARE-AI Sovereign Engine Selection\033[0m"
+        echo -e "\033[1;36m===================================================\033[0m"
+        echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
+        echo -e "   1) DeepSeek R1 (8B)        [deepseek-r1:8b]"
+        echo -e "   2) Gemma 4 (E4B Edge)      [gemma4:e4b]"
+        echo -e "   3) Gemma 4 (31B Heavy)     [gemma4:31b]"
+        echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
+        echo -e "   4) Granite 4 (Tiny)        [granite4:tiny-h]"
+        echo -e "   5) Granite 3.3 (8B)        [granite3.3:8b]"
+        echo -e "   6) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
+        echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
+        echo -e "   7) Tir-Na-AI Fast          [tir-na-ai-fast]"
+        echo -e "---------------------------------------------------"
+        
+        read -rp "Select a model [1-7]: " menu_choice
+        case "$menu_choice" in
+            1) MODEL="deepseek-r1:8b" ;;
+            2) MODEL="gemma4:e4b" ;;
+            3) MODEL="gemma4:31b" ;;
+            4) MODEL="granite4:tiny-h" ;;
+            5) MODEL="granite3.3:8b" ;;
+            6) MODEL="deepseek-coder-v2:latest" ;;
+            7) MODEL="tir-na-ai-fast" ;;
+            *) echo -e "\033[0;31mInvalid selection. Aborting.\033[0m"; return 1 ;;
+        esac
+        echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
+    fi
 
     # Load Vault credentials dynamically (This securely sets VAULT_ADDR)
     if [ -f "$VAULT_ENV" ]; then
@@ -617,15 +641,17 @@ bare() {
     if [ -f "$CONFIG" ]; then
         source "$CONFIG"
     fi
-
     
     # Sovereign model/vault routing
     case "$MODEL" in
-        energy)  export VAULT_SECRET_PATH="secret/data/tir-na-ai/config";      export BARE_AI_NO_TOOLS="true"  ;;
-        loco)    export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        granite) export VAULT_SECRET_PATH="secret/data/granite/config";        export BARE_AI_NO_TOOLS="false" ;;
-        gemma4)  export VAULT_SECRET_PATH="secret/data/gemma4/config";         export BARE_AI_NO_TOOLS="false" ;;
-        *)       export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
+        tir-na-ai-fast)           export VAULT_SECRET_PATH="secret/data/tir-na-ai-fast/config"; export BARE_AI_NO_TOOLS="true"  ;;
+        gemma4:31b)               export VAULT_SECRET_PATH="secret/data/gemma4:31b/config";     export BARE_AI_NO_TOOLS="false" ;;
+        gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/gemma4:e4b/config";     export BARE_AI_NO_TOOLS="false" ;;
+        granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/granite4:tiny-h/config";export BARE_AI_NO_TOOLS="false" ;;
+        granite3.3:8b)            export VAULT_SECRET_PATH="secret/data/granite3.3:8b/config";  export BARE_AI_NO_TOOLS="false" ;;
+        deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/deepseek-r1:8b/config"; export BARE_AI_NO_TOOLS="true"  ;;
+        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/deepseek-coder-v2:latest/config"; export BARE_AI_NO_TOOLS="false" ;;
+        *)                        export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
     esac
 
     # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
@@ -640,8 +666,8 @@ bare() {
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
         
-        # Safely remove the model name ONLY if arguments exist
-        if [ $# -gt 0 ]; then shift; fi
+        # Safely remove the model name ONLY if arguments exist and matched the menu selection
+        if [ $# -gt 0 ] && [ "$1" = "$MODEL" ]; then shift; fi
         
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@"
         # Log forwarding
@@ -673,8 +699,9 @@ alias bare-status='echo "🔍 Local Telemetry Audit:"; bare-summarize | jq .'
 alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
 alias bare-uninstall='~/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
+
+# END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
-    echo -e "${GREEN}✓ bare() function added to .bashrc${NC}"
 
 #####################################################
 #####################################################
