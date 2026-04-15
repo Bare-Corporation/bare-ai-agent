@@ -214,10 +214,11 @@ EOF
 
     # 9. Seed Default Models (Prep for tomorrow)
     echo -e "${YELLOW}Seeding default model endpoints...${NC}"
-    vault kv put secret/tir-na-ai/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai:latest" api_key="local" > /dev/null
+    vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
     vault kv put secret/tir-na-ai-fast/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai-fast:latest" api_key="local" > /dev/null
-    vault kv put secret/gemma4/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
-    vault kv put secret/granite/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
+    vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
+    vault kv put secret/granite4:tiny-h/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
+    vault kv put secret/deepseek-r1:8b/config base_url="http://127.0.0.1:11434" model_name="deepseek-r1:8b" api_key="local" > /dev/null
 
     # 10. Extract IDs for the Agent
     AGENT_ROLE_ID=$(vault read -field=role_id auth/approle/role/bare-ai-role/role-id)
@@ -695,8 +696,8 @@ echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your
 echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 echo -e "3. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
 echo -e "4. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
-echo -e "5. ${GREEN}Architecture:${NC}   $ENGINE_TYPE backend loaded (<< Info only.)"
-echo -e "6. ${RED}Uninstall:${NC}        bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+echo -e "5. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
+echo -e "6. ${RED}Uninstall:${NC}      bare-uninstall (<< opt - Runs script to purge agent/cli.)"
 
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
