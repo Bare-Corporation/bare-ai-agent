@@ -6,7 +6,7 @@
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
 #   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
 #                                                           #
-#  Hybrid Bare-AI-Agent Worker Installer                    #
+#                                                           #
 #  by the Cloud Integration Corporation                     #
 #############################################################
 # ==============================================================================
@@ -25,12 +25,6 @@
 # - ux(cli): Refined post-install terminal instructions for user clarity.
 # ==============================================================================
 set -euo pipefail
-# --- FAST UPDATE CHECK ---
-FAST_UPDATE=false
-if [[ "${1:-}" == "--fast" ]]; then
-    FAST_UPDATE=true
-    echo -e "${YELLOW}Running in FAST UPDATE mode. Skipping engine build...${NC}"
-fi
 
 # --- DOCKER / Podman WARNING ---
 if [ ! -f "/.dockerenv" ]; then
@@ -657,7 +651,7 @@ bare() {
         granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/granite4:tiny-h/config";export BARE_AI_NO_TOOLS="false" ;;
         qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/qwen2.5-coder:32b/config"; export BARE_AI_NO_TOOLS="false" ;;
         deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/deepseek-r1:8b/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/deepseek-coder-v2:latest/config"; export BARE_AI_NO_TOOLS="false" ;;
+        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/deepseek-coder-v2:latest/config"; export BARE_AI_NO_TOOLS="true" ;;
         tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:iGPU/config"; export BARE_AI_NO_TOOLS="true" ;;
         *)                        export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="true" ;;
     esac
