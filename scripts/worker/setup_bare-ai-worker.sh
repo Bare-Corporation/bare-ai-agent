@@ -817,7 +817,6 @@ echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your age
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
 echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
 echo -e "5. ${RED}Uninstall:${NC}      bare-uninstall (<< opt - Runs script to purge agent/cli.)"
-fi
 
 echo -e "info. ${YELLOW}Fleet Info:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 # Set up 1-minute thermal heartbeat
