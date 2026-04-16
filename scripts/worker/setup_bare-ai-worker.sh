@@ -801,8 +801,8 @@ BARE_FUNC_EOF
 # --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
-echo -e "${Yellow} A Cloud Integration Corporation Custom Build${NC}"
-echo -e "${Yellow} www.cloudintcorp.com${NC}"
+echo -e "${YELLOW} A Cloud Integration Corporation Custom Build${NC}"
+echo -e "${YELLOW} www.cloudintcorp.com${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
