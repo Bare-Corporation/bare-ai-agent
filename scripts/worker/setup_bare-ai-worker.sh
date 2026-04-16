@@ -751,11 +751,11 @@ bare() {
 
         # Force the CLI to use this combined string
         export BARE_AI_SYSTEM_PROMPT="$combined_const"
+        export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
                 
-        cd "$HOME/bare-ai-cli" && node sovereign.js "$@"
-
+        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
 ##########################
         ##################
@@ -801,6 +801,8 @@ BARE_FUNC_EOF
 # --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
+echo -e "${Yellow} A Cloud Integration Corporation Custom Build${NC}"
+echo -e "${Yellow} www.cloudintcorp.com${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
@@ -811,12 +813,13 @@ echo -e "0. Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
 fi
 
 echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your systems ~/.bashrc with modifications.)"
-echo -e "2. ${YELLOW}Test artifact:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
-echo -e "3. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
-echo -e "4. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
-echo -e "5. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
-echo -e "6. ${RED}Uninstall:${NC}      bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
+echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
+echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
+echo -e "5. ${RED}Uninstall:${NC}      bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+fi
 
+echo -e "info. ${YELLOW}Fleet Info:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
 (crontab -l 2>/dev/null | grep -v "bare-thermal-guard"; echo "* * * * * /usr/local/bin/bare-thermal-guard") | crontab -
