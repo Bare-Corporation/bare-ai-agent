@@ -240,8 +240,6 @@ EOF
     vault kv put secret/gemini-2.5-pro/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-pro" api_key="local" > /dev/null
     vault kv put secret/gemini-3-flash-preview/config base_url="http://127.0.0.1:11434" model_name="gemini-3-flash-preview" api_key="local" > /dev/null
     vault kv put secret/gemini-3.1-pro-preview/config base_url="http://127.0.0.1:11434" model_name="gemini-3.1-pro-preview" api_key="local" > /dev/null
-    vault kv put secret/claude-3-5-sonnet/config base_url="http://127.0.0.1:11434" model_name="claude-3-5-sonnet" api_key="local" > /dev/null
-    vault kv put secret/claude-3-opus/config base_url="http://127.0.0.1:11434" model_name="claude-3-opus" api_key="local" > /dev/null
     vault kv put secret/gpt-4o/config base_url="http://127.0.0.1:11434" model_name="gpt-4o" api_key="local" > /dev/null
     vault kv put secret/gpt-4-turbo/config base_url="http://127.0.0.1:11434" model_name="gpt-4-turbo" api_key="local" > /dev/null
     vault kv put secret/o1-preview/config base_url="http://127.0.0.1:11434" model_name="o1-preview" api_key="local" > /dev/null
@@ -652,9 +650,7 @@ bare() {
         echo -e "   103) Gemini 2.5 Pro         [gemini-2.5-pro]"
         echo -e "   104) Gemini 3 Flash (Pre)   [gemini-3-flash-preview]"
         echo -e "   105) Gemini 3.1 Pro (Pre)   [gemini-3.1-pro-preview]"
-        echo -e " [The Claude Estate]"
-        echo -e "   151) Claude 3.5 Sonnet      [claude-3-5-sonnet]"
-        echo -e "   152) Claude 3 Opus (Heavy)  [claude-3-opus]"
+       
         echo -e " [The GPT Nexus]"
         echo -e "   201) GPT-4o (Omni)          [gpt-4o]"
         echo -e "   202) GPT-4-Turbo            [gpt-4-turbo]"
@@ -677,8 +673,6 @@ bare() {
             103) MODEL="gemini-2.5-pro" ;;
             104) MODEL="gemini-3-flash-preview" ;;
             105) MODEL="gemini-3.1-pro-preview" ;;
-            151) MODEL="claude-3-5-sonnet" ;;
-            152) MODEL="claude-3-opus" ;;
             201) MODEL="gpt-4o" ;;
             202) MODEL="gpt-4-turbo" ;;
             203) MODEL="o1-preview" ;;
@@ -728,8 +722,6 @@ bare() {
         gemini-2.5-pro)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-pro/config" ; export BARE_AI_NO_TOOLS="false" ;;
         gemini-3-flash-preview)  export VAULT_SECRET_PATH="secret/data/gemini-3-flash-preview/config" ; export BARE_AI_NO_TOOLS="false" ;;
         gemini-3.1-pro-preview)  export VAULT_SECRET_PATH="secret/data/gemini-3.1-pro-preview/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        claude-3.5-sonnet) export VAULT_SECRET_PATH="secret/data/claude-3.5-sonnet/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        claude-3-opus) export VAULT_SECRET_PATH="secret/data/claude-3-opus/config" ; export BARE_AI_NO_TOOLS="false" ;;
         gpt-4o) export VAULT_SECRET_PATH="secret/data/gpt-4o/config" ; export BARE_AI_NO_TOOLS="false" ;;
         gpt-4-turbo) export VAULT_SECRET_PATH="secret/data/gpt-4-turbo/config" ; export BARE_AI_NO_TOOLS="false" ;;
         o1-preview) export VAULT_SECRET_PATH="secret/data/o1-preview/config" ; export BARE_AI_NO_TOOLS="true" ;;
