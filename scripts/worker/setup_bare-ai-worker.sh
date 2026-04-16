@@ -702,31 +702,30 @@ bare() {
     if [ ! -f "$ROLE_CONST" ]; then
         echo -e "\033[1;33mWarning: No role constitution at $ROLE_CONST — running with technical only.\033[0m"
     fi
-    
-    # BARE-AI Sovereign Free Engine model/vault routing
-    case "$MODEL" in
-        tir-na-ai:latest)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:latest/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        gemma4:31b)               export VAULT_SECRET_PATH="secret/data/gemma4:31b/config";     export BARE_AI_NO_TOOLS="false" ;;
-        gemma4:26b)               export VAULT_SECRET_PATH="secret/data/gemma4:26b/config";     export BARE_AI_NO_TOOLS="false" ;;
-        gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/gemma4:e4b/config";     export BARE_AI_NO_TOOLS="false" ;;
-        granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/granite4:tiny-h/config";export BARE_AI_NO_TOOLS="false" ;;
-        qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/qwen2.5-coder:32b/config"; export BARE_AI_NO_TOOLS="false" ;;
-        deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/deepseek-r1:8b/config"; export BARE_AI_NO_TOOLS="true"  ;;
-        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/deepseek-coder-v2:latest/config"; export BARE_AI_NO_TOOLS="true" ;;
-        tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai:iGPU/config"; export BARE_AI_NO_TOOLS="true" ;;
 
-    
-    # BARE-AI Sovereign Premium Engine model/vault routing
-        gemini-2.5-flash-lite)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-flash-lite/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-2.5-flash)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-flash/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-2.5-pro)  export VAULT_SECRET_PATH="secret/data/gemini-2.5-pro/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-3-flash-preview)  export VAULT_SECRET_PATH="secret/data/gemini-3-flash-preview/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-3.1-pro-preview)  export VAULT_SECRET_PATH="secret/data/gemini-3.1-pro-preview/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        gpt-4o) export VAULT_SECRET_PATH="secret/data/gpt-4o/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        gpt-4-turbo) export VAULT_SECRET_PATH="secret/data/gpt-4-turbo/config" ; export BARE_AI_NO_TOOLS="false" ;;
-        o1-preview) export VAULT_SECRET_PATH="secret/data/o1-preview/config" ; export BARE_AI_NO_TOOLS="true" ;;
-        *)                 export VAULT_SECRET_PATH="secret/data/${MODEL}/config";       export BARE_AI_NO_TOOLS="false" ;;
+     # BARE-AI Sovereign Free Engine model/vault routing
+    case "$MODEL" in
+        deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/001"; export BARE_AI_NO_TOOLS="true"  ;;
+        tir-na-ai:latest)         export VAULT_SECRET_PATH="secret/data/tir-na-ai/002"; export BARE_AI_NO_TOOLS="true"  ;;
+        gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/003"; export BARE_AI_NO_TOOLS="false" ;;
+        gemma4:26b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/004"; export BARE_AI_NO_TOOLS="false" ;;
+        gemma4:31b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/005"; export BARE_AI_NO_TOOLS="false" ;;
+        granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/tir-na-ai/006"; export BARE_AI_NO_TOOLS="false" ;;
+        qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/tir-na-ai/007"; export BARE_AI_NO_TOOLS="false" ;;
+        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/tir-na-ai/008"; export BARE_AI_NO_TOOLS="true" ;;
+        tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/009"; export BARE_AI_NO_TOOLS="true" ;;
+
+        # BARE-AI Sovereign Premium Engine model/vault routing
+        gemini-2.5-flash-lite)    export VAULT_SECRET_PATH="secret/data/tir-na-ai/101"; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-2.5-flash)         export VAULT_SECRET_PATH="secret/data/tir-na-ai/102"; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-2.5-pro)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/103"; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-3-flash-preview)   export VAULT_SECRET_PATH="secret/data/tir-na-ai/104"; export BARE_AI_NO_TOOLS="false" ;;
+        gemini-3.1-pro-preview)   export VAULT_SECRET_PATH="secret/data/tir-na-ai/105"; export BARE_AI_NO_TOOLS="false" ;;
         
+        gpt-4o)                   export VAULT_SECRET_PATH="secret/data/tir-na-ai/201"; export BARE_AI_NO_TOOLS="false" ;;
+        gpt-4-turbo)              export VAULT_SECRET_PATH="secret/data/tir-na-ai/202"; export BARE_AI_NO_TOOLS="false" ;;
+        o1-preview)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/203"; export BARE_AI_NO_TOOLS="true"  ;;
+        *)                        export VAULT_SECRET_PATH="secret/data/tir-na-ai/${MODEL}"; export BARE_AI_NO_TOOLS="false" ;;
     esac
 
     # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
