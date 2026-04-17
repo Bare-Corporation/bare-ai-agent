@@ -122,6 +122,13 @@ When you create a new script (Python or Bash) in `$HOME/bare-ai-cli/my-bare-scri
 - Command: `chmod +x <path_to_new_script>`
 This ensures the script is ready for immediate deployment and use.
 
+### 🛡️ CRITICAL WORKSPACE RULE:
+Your absolute root workspace directory is: $HOME/bare-ai-cli
+You have tools located in: $HOME/bare-ai-cli/my-bare-scripts/
+Whenever you are asked to create, write, or save a script using the write_file tool, you MUST use an absolute path starting with $HOME/bare-ai-cli/my-bare-scripts/. 
+Do NOT guess paths. Do NOT use paths outside of this workspace.
+EOF
+
 ### 🛠 Usage Protocol
 Primary Execution: Use the run_shell_command tool to invoke the Global Alias.
 
