@@ -625,7 +625,9 @@ bare() {
     if [ -z "$MODEL" ]; then
         if [ "$ENGINE_TYPE" = "sovereign" ]; then
         echo -e "\n\033[1;37m===================================================\033[0m"
+        echo -e "\033[1;37m===================================================\033[0m"
         echo -e "\033[1;37m☎️🤖 000 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
+        echo -e "\033[1;37m===================================================\033[0m"
         echo -e "\033[1;37m===================================================\033[0m"
         
         echo -e "\n\033[1;36m===================================================\033[0m"
@@ -639,13 +641,17 @@ bare() {
         echo -e "   011) DeepSeek R1 (8B)        [deepseek-r1:8b]"
         echo -e "   012) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
 
-        echo -e "   003) Gemma 4 (E4B Edge)      [gemma4:e4b]"
-        echo -e "   004) Gemma 4 (26B MOE)       [gemma4:26b]"
-        echo -e "   005) Gemma 4 (31B Heavy)     [gemma4:31b]"
+        echo -e "   041) Gemma 4 (E4B Edge)      [gemma4:e4b]"
+        echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
+        echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
+        
         echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
         
-        echo -e "   006) Granite 4 (Tiny)        [granite4:tiny-h]"
-        echo -e "   007) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
+        echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
+        echo -e "   022) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
+        echo -e "   022) llama3.1 (32B)          [llama3.1:8b]"
+        echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
+        echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         
         echo -e "---------------------------------------------------"
 
@@ -665,7 +671,7 @@ bare() {
         echo -e "   203) o1-preview (Reasoning) [o1-preview]"
         echo -e "---------------------------------------------------"
 
-                read -rp "Select a model code [001-203]: " menu_choice
+                read -rp "Select a model code [000-203]: " menu_choice
         case "$menu_choice" in
             000) MODEL="tir-na-ai:iGPU" ;;
             001) MODEL="tir-na-ai:latest" ;;
