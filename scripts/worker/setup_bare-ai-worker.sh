@@ -626,12 +626,12 @@ bare() {
         if [ "$ENGINE_TYPE" = "sovereign" ]; then
         echo -e "\n\033[1;37m===================================================\033[0m"
         echo -e "\033[1;37m===================================================\033[0m"
-        echo -e "\033[1;37m☎️🤖 000 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
+        echo -e "\033[1;37m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
         echo -e "\033[1;37m===================================================\033[0m"
         echo -e "\033[1;37m===================================================\033[0m"
         
         echo -e "\n\033[1;36m===================================================\033[0m"
-        echo -e "\033[1;36m🔱🤖  BARE-AI SOVEREIGN Engine Selection\033[0m"
+        echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
         echo -e "\033[1;36m===================================================\033[0m"
         echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
         echo -e "   000) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
@@ -640,15 +640,14 @@ bare() {
         echo -e "   001) Tir-Na-AI (8B)          [tir-na-ai:latest]"
         echo -e "   011) DeepSeek R1 (8B)        [deepseek-r1:8b]"
         echo -e "   012) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
-
         echo -e "   041) Gemma 4 (E4B Edge)      [gemma4:e4b]"
         echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
         echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
         
-        echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
-        
+        echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"      
         echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
-        echo -e "   022) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
+        echo -e "   022) Qwen 2.5 Coder (14B)    [qwen2.5-coder:14b]"
+        echo -e "   023) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
         echo -e "   031) llama3.1 (8B)           [llama3.1:8b]"
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
@@ -656,7 +655,7 @@ bare() {
         echo -e "---------------------------------------------------"
 
                 echo -e "\n\033[1;35m===================================================\033[0m"
-        echo -e "\033[1;35m⭐🤖 100 - BARE-AI PREMIUM Engine Selection\033[0m"
+        echo -e "\033[1;35m⭐🤖 101-999 - BARE-AI PREMIUM Engine Selection\033[0m"
         echo -e "\033[1;35m===================================================\033[0m"
         echo -e " \033[1;33m[The Gemini Constellation]\033[0m"
         echo -e "   101) Gemini 2.5 Flash Lite  [gemini-2.5-flash-lite]"
@@ -678,7 +677,8 @@ bare() {
             011) MODEL="deepseek-r1:8b" ;;
             012) MODEL="deepseek-coder-v2:latest" ;;
             021) MODEL="qwen2.5-coder:7b" ;;
-            022) MODEL="qwen2.5-coder:32b" ;;
+            022) MODEL="qwen2.5-coder:14b" ;;
+            023) MODEL="qwen2.5-coder:32b" ;;
             031) MODEL="llama3.1:8b" ;;    
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
@@ -720,33 +720,18 @@ bare() {
         echo -e "\033[1;33mWarning: No role constitution at $ROLE_CONST — running with technical only.\033[0m"
     fi
 
-     # BARE-AI Sovereign Free Engine model/vault routing
-    case "$MODEL" in
-        tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/000"; export BARE_AI_NO_TOOLS="true" ;;
-        tir-na-ai:latest)         export VAULT_SECRET_PATH="secret/data/tir-na-ai/001"; export BARE_AI_NO_TOOLS="true"  ;;
-        deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/011"; export BARE_AI_NO_TOOLS="true"  ;;
-        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/tir-na-ai/012"; export BARE_AI_NO_TOOLS="true" ;;
-        qwen2.5-coder:7b )        export VAULT_SECRET_PATH="secret/data/tir-na-ai/021"; export BARE_AI_NO_TOOLS="false" ;;
-        qwen2.5-coder:14b )       export VAULT_SECRET_PATH="secret/data/tir-na-ai/022"; export BARE_AI_NO_TOOLS="false" ;;
-        qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/tir-na-ai/023"; export BARE_AI_NO_TOOLS="false" ;;
-        llama3.1:8b    )          export VAULT_SECRET_PATH="secret/data/tir-na-ai/031"; export BARE_AI_NO_TOOLS="false" ;;  
-        gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/041"; export BARE_AI_NO_TOOLS="false" ;;
-        gemma4:26b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/042"; export BARE_AI_NO_TOOLS="false" ;;
-        gemma4:31b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/043"; export BARE_AI_NO_TOOLS="false" ;;
-        mistral-nemo:latest)      export VAULT_SECRET_PATH="secret/data/tir-na-ai/051"; export BARE_AI_NO_TOOLS="false" ;;  
-        granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/tir-na-ai/061"; export BARE_AI_NO_TOOLS="false" ;;
 
-        # BARE-AI Sovereign Premium Engine model/vault routing
-        gemini-2.5-flash-lite)    export VAULT_SECRET_PATH="secret/data/tir-na-ai/101"; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-2.5-flash)         export VAULT_SECRET_PATH="secret/data/tir-na-ai/102"; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-2.5-pro)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/103"; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-3-flash-preview)   export VAULT_SECRET_PATH="secret/data/tir-na-ai/104"; export BARE_AI_NO_TOOLS="false" ;;
-        gemini-3.1-pro-preview)   export VAULT_SECRET_PATH="secret/data/tir-na-ai/105"; export BARE_AI_NO_TOOLS="false" ;;
-        
-        gpt-4o)                   export VAULT_SECRET_PATH="secret/data/tir-na-ai/201"; export BARE_AI_NO_TOOLS="false" ;;
-        gpt-4-turbo)              export VAULT_SECRET_PATH="secret/data/tir-na-ai/202"; export BARE_AI_NO_TOOLS="false" ;;
-        o1-preview)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/203"; export BARE_AI_NO_TOOLS="true"  ;;
-        *)                        export VAULT_SECRET_PATH="secret/data/tir-na-ai/${MODEL}"; export BARE_AI_NO_TOOLS="false" ;;
+    # Unified Vault Routing (Matches Vault schema and CLI hot-swapper perfectly)
+    export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
+
+    # Dynamic Tool Capability Mapping
+    case "$MODEL" in
+        tir-na-ai:*|deepseek-*|gemma4:*|o1-preview) 
+            export BARE_AI_NO_TOOLS="true" 
+            ;;
+        *) 
+            export BARE_AI_NO_TOOLS="false" 
+            ;;
     esac
 
     # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
