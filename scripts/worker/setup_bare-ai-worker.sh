@@ -670,7 +670,7 @@ bare() {
         echo -e "   203) o1-preview (Reasoning) [o1-preview]"
         echo -e "---------------------------------------------------"
 
-                read -rp "Select a model code [000-203]: " menu_choice
+                read -rp "Select a model code [000-999]: " menu_choice
         case "$menu_choice" in
             000) MODEL="tir-na-ai:iGPU" ;;
             001) MODEL="tir-na-ai:latest" ;;
