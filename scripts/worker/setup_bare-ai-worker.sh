@@ -227,7 +227,7 @@ EOF
         secret_id_ttl=0 token_num_uses=0 token_ttl=0 token_max_ttl=0 secret_id_num_uses=0 \
         policies="bare-ai-policy" > /dev/null
 
-    # 9. Seed Default Models (Prep for tomorrow)
+    # 9. Seed Default Models
     echo -e "${YELLOW}Seeding default model endpoints...${NC}"
     vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
     vault kv put secret/tir-na-ai-fast/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai-fast:latest" api_key="local" > /dev/null
@@ -624,25 +624,33 @@ bare() {
     # --- INTERACTIVE MODEL MENU ---
     if [ -z "$MODEL" ]; then
         if [ "$ENGINE_TYPE" = "sovereign" ]; then
+        echo -e "\n\033[1;37m===================================================\033[0m"
+        echo -e "\033[1;37m☎️🤖 000 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
+        echo -e "\033[1;37m===================================================\033[0m"
+        
         echo -e "\n\033[1;36m===================================================\033[0m"
-        echo -e "\033[1;36m🔱🤖  BARE-AI Sovereign Free Engine Selection\033[0m"
+        echo -e "\033[1;36m🔱🤖  BARE-AI SOVEREIGN Engine Selection\033[0m"
         echo -e "\033[1;36m===================================================\033[0m"
+        echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
+        echo -e "   000) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
+        
         echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
-        echo -e "   001) DeepSeek R1 (8B)        [deepseek-r1:8b]"
-        echo -e "   002) Tir-Na-AI (8B)          [tir-na-ai:latest]"
+        echo -e "   001) Tir-Na-AI (8B)          [tir-na-ai:latest]"
+        echo -e "   011) DeepSeek R1 (8B)        [deepseek-r1:8b]"
+        echo -e "   012) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
+
         echo -e "   003) Gemma 4 (E4B Edge)      [gemma4:e4b]"
         echo -e "   004) Gemma 4 (26B MOE)       [gemma4:26b]"
         echo -e "   005) Gemma 4 (31B Heavy)     [gemma4:31b]"
         echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"
+        
         echo -e "   006) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   007) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
-        echo -e "   008) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
-        echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
-        echo -e "   009) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
+        
         echo -e "---------------------------------------------------"
 
                 echo -e "\n\033[1;35m===================================================\033[0m"
-        echo -e "\033[1;35m⭐🤖 BARE-AI Sovereign PREMIUM Engine Selection\033[0m"
+        echo -e "\033[1;35m⭐🤖 100 - BARE-AI PREMIUM Engine Selection\033[0m"
         echo -e "\033[1;35m===================================================\033[0m"
         echo -e " \033[1;33m[The Gemini Constellation]\033[0m"
         echo -e "   101) Gemini 2.5 Flash Lite  [gemini-2.5-flash-lite]"
@@ -659,15 +667,18 @@ bare() {
 
                 read -rp "Select a model code [001-203]: " menu_choice
         case "$menu_choice" in
-            001) MODEL="deepseek-r1:8b" ;;
-            002) MODEL="tir-na-ai:latest" ;;
-            003) MODEL="gemma4:e4b" ;;
-            004) MODEL="gemma4:26b" ;;
-            005) MODEL="gemma4:31b" ;;
-            006) MODEL="granite4:tiny-h" ;;
-            007) MODEL="qwen2.5-coder:32b" ;;
-            008) MODEL="deepseek-coder-v2:latest" ;;
-            009) MODEL="tir-na-ai:iGPU" ;;
+            000) MODEL="tir-na-ai:iGPU" ;;
+            001) MODEL="tir-na-ai:latest" ;;
+            011) MODEL="deepseek-r1:8b" ;;
+            012) MODEL="deepseek-coder-v2:latest" ;;
+            021) MODEL="qwen2.5-coder:7b" ;;
+            022) MODEL="qwen2.5-coder:32b" ;;
+            031) MODEL="llama3.1:8b" ;;    
+            041) MODEL="gemma4:e4b" ;;
+            042) MODEL="gemma4:26b" ;;
+            043) MODEL="gemma4:31b" ;;
+            051) MODEL="mistral-nemo:latest" ;;    
+            061) MODEL="granite4:tiny-h" ;;
             101) MODEL="gemini-2.5-flash-lite" ;;
             102) MODEL="gemini-2.5-flash" ;;
             103) MODEL="gemini-2.5-pro" ;;
@@ -705,15 +716,19 @@ bare() {
 
      # BARE-AI Sovereign Free Engine model/vault routing
     case "$MODEL" in
-        deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/001"; export BARE_AI_NO_TOOLS="true"  ;;
-        tir-na-ai:latest)         export VAULT_SECRET_PATH="secret/data/tir-na-ai/002"; export BARE_AI_NO_TOOLS="true"  ;;
-        gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/003"; export BARE_AI_NO_TOOLS="false" ;;
-        gemma4:26b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/004"; export BARE_AI_NO_TOOLS="false" ;;
-        gemma4:31b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/005"; export BARE_AI_NO_TOOLS="false" ;;
-        granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/tir-na-ai/006"; export BARE_AI_NO_TOOLS="false" ;;
-        qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/tir-na-ai/007"; export BARE_AI_NO_TOOLS="false" ;;
-        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/tir-na-ai/008"; export BARE_AI_NO_TOOLS="true" ;;
-        tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/009"; export BARE_AI_NO_TOOLS="true" ;;
+        tir-na-ai:iGPU)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/000"; export BARE_AI_NO_TOOLS="true" ;;
+        tir-na-ai:latest)         export VAULT_SECRET_PATH="secret/data/tir-na-ai/001"; export BARE_AI_NO_TOOLS="true"  ;;
+        deepseek-r1:8b)           export VAULT_SECRET_PATH="secret/data/tir-na-ai/011"; export BARE_AI_NO_TOOLS="true"  ;;
+        deepseek-coder-v2:latest) export VAULT_SECRET_PATH="secret/data/tir-na-ai/012"; export BARE_AI_NO_TOOLS="true" ;;
+        qwen2.5-coder:7b )        export VAULT_SECRET_PATH="secret/data/tir-na-ai/021"; export BARE_AI_NO_TOOLS="false" ;;
+        qwen2.5-coder:14b )       export VAULT_SECRET_PATH="secret/data/tir-na-ai/022"; export BARE_AI_NO_TOOLS="false" ;;
+        qwen2.5-coder:32b)        export VAULT_SECRET_PATH="secret/data/tir-na-ai/023"; export BARE_AI_NO_TOOLS="false" ;;
+        llama3.1:8b    )          export VAULT_SECRET_PATH="secret/data/tir-na-ai/031"; export BARE_AI_NO_TOOLS="false" ;;  
+        gemma4:e4b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/041"; export BARE_AI_NO_TOOLS="false" ;;
+        gemma4:26b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/042"; export BARE_AI_NO_TOOLS="false" ;;
+        gemma4:31b)               export VAULT_SECRET_PATH="secret/data/tir-na-ai/043"; export BARE_AI_NO_TOOLS="false" ;;
+        mistral-nemo:latest)      export VAULT_SECRET_PATH="secret/data/tir-na-ai/051"; export BARE_AI_NO_TOOLS="false" ;;  
+        granite4:tiny-h)          export VAULT_SECRET_PATH="secret/data/tir-na-ai/061"; export BARE_AI_NO_TOOLS="false" ;;
 
         # BARE-AI Sovereign Premium Engine model/vault routing
         gemini-2.5-flash-lite)    export VAULT_SECRET_PATH="secret/data/tir-na-ai/101"; export BARE_AI_NO_TOOLS="false" ;;
@@ -816,9 +831,9 @@ echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your
 echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
 echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
-echo -e "5. ${RED}Uninstall:${NC}      bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+echo -e "5. ${RED}Uninstall:${NC}        bare-uninstall (<< opt - Runs script to purge agent/cli.)"
 
-echo -e "info. ${YELLOW}Fleet Info:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
+echo -e "i. ${YELLOW}Fleet Info:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
 (crontab -l 2>/dev/null | grep -v "bare-thermal-guard"; echo "* * * * * /usr/local/bin/bare-thermal-guard") | crontab -
