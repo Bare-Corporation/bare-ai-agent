@@ -623,20 +623,17 @@ bare() {
     # --- INTERACTIVE MODEL MENU ---
     if [ -z "$MODEL" ]; then
         if [ "$ENGINE_TYPE" = "sovereign" ]; then
-        echo -e "\n\033[38;5;37m===================================================\033[0m"
-        echo -e "\n\033[1;36m===================================================\033[0m"
-        echo -e "\n\033[1;35m===================================================\033[0m"
-        echo -e "\033[1;37m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
-        echo -e "\n\033[1;35m===================================================\033[0m"
-        echo -e "\n\033[1;36m===================================================\033[0m"
-        echo -e "\n\033[38;5;37m===================================================\033[0m"
-        
+                echo -e "\n\033[1;33m===================================================\033[0m"
+        echo -e "\033[1;33m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
+        echo -e "\033[1;33m===================================================\033[0m"
+
+
         echo -e "\n\033[1;36m===================================================\033[0m"
         echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
         echo -e "\033[1;36m===================================================\033[0m"
         echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
         echo -e "   000) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
-        
+
         echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
         echo -e "   001) Tir-Na-AI (8B)          [tir-na-ai:latest]"
         echo -e "   011) DeepSeek R1 (8B)        [deepseek-r1:8b]"
@@ -644,7 +641,7 @@ bare() {
         echo -e "   041) Gemma 4 (E4B Edge)      [gemma4:e4b]"
         echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
         echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
-        
+
         echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"      
         echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
         echo -e "   022) Qwen 2.5 Coder (14B)    [qwen2.5-coder:14b]"
@@ -652,7 +649,7 @@ bare() {
         echo -e "   031) llama3.1 (8B)           [llama3.1:8b]"
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
-        
+
         echo -e "---------------------------------------------------"
 
         echo -e "\n\033[1;35m===================================================\033[0m"
@@ -664,7 +661,7 @@ bare() {
         echo -e "   103) Gemini 2.5 Pro         [gemini-2.5-pro]"
         echo -e "   104) Gemini 3 Flash (Pre)   [gemini-3-flash-preview]"
         echo -e "   105) Gemini 3.1 Pro (Pre)   [gemini-3.1-pro-preview]"
-       
+
         echo -e " \033[1;33m[The GPT Nexus]\033[0m"
         echo -e "   201) GPT-4o (Omni)          [gpt-4o]"
         echo -e "   202) GPT-4-Turbo            [gpt-4-turbo]"
