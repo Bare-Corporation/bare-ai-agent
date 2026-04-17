@@ -649,7 +649,7 @@ bare() {
         
         echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
         echo -e "   022) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
-        echo -e "   022) llama3.1 (32B)          [llama3.1:8b]"
+        echo -e "   031) llama3.1 (8B)           [llama3.1:8b]"
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         
