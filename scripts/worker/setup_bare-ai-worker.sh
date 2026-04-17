@@ -620,15 +620,16 @@ bare() {
         source "$CONFIG"
     fi
 
-
     # --- INTERACTIVE MODEL MENU ---
     if [ -z "$MODEL" ]; then
         if [ "$ENGINE_TYPE" = "sovereign" ]; then
-        echo -e "\n\033[1;37m===================================================\033[0m"
-        echo -e "\033[1;37m===================================================\033[0m"
+        echo -e "\n\033[38;5;37m===================================================\033[0m"
+        echo -e "\n\033[1;36m===================================================\033[0m"
+        echo -e "\n\033[1;35m===================================================\033[0m"
         echo -e "\033[1;37m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
-        echo -e "\033[1;37m===================================================\033[0m"
-        echo -e "\033[1;37m===================================================\033[0m"
+        echo -e "\n\033[1;35m===================================================\033[0m"
+        echo -e "\n\033[1;36m===================================================\033[0m"
+        echo -e "\n\033[38;5;37m===================================================\033[0m"
         
         echo -e "\n\033[1;36m===================================================\033[0m"
         echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
@@ -654,7 +655,7 @@ bare() {
         
         echo -e "---------------------------------------------------"
 
-                echo -e "\n\033[1;35m===================================================\033[0m"
+        echo -e "\n\033[1;35m===================================================\033[0m"
         echo -e "\033[1;35m⭐🤖 101-999 - BARE-AI PREMIUM Engine Selection\033[0m"
         echo -e "\033[1;35m===================================================\033[0m"
         echo -e " \033[1;33m[The Gemini Constellation]\033[0m"
@@ -720,7 +721,6 @@ bare() {
         echo -e "\033[1;33mWarning: No role constitution at $ROLE_CONST — running with technical only.\033[0m"
     fi
 
-
     # Unified Vault Routing (Matches Vault schema and CLI hot-swapper perfectly)
     export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
 
@@ -760,11 +760,27 @@ bare() {
         export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
-                
+
+        # --- BARE-AI ENGINE PRE-FLIGHT CHECK ---
+        # Only check local Sovereign models, ignore Premium Cloud models (Gemini/GPT)
+        if [[ "$MODEL" =~ ^(tir-na-ai|deepseek|gemma|qwen|llama|mistral|granite) ]]; then
+            if command -v ollama &>/dev/null; then
+                if ! ollama list | grep -q "${MODEL}"; then
+                    echo -e "\n\033[1;33m[sovereign] Sovereign Engine '$MODEL' is missing its neural weights.\033[0m"
+                    read -rp "Would you like to auto-install it via Ollama now? (May take a few minutes) [y/N]: " PULL_CHOICE
+                    if [[ "$PULL_CHOICE" =~ ^[Yy]$ ]]; then
+                        echo -e "\033[0;32mPulling $MODEL... Please wait.\033[0m"
+                        ollama pull "$MODEL" || echo -e "\033[0;31m❌ Failed to pull model.\033[0m"
+                    else
+                        echo -e "\033[1;33mProceeding without weights. The model will return a 404 until installed.\033[0m"
+                    fi
+                fi
+            fi
+        fi
+
+        # Launch CLI normally (No infinite loops!)
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
-##########################
-        ##################
         # Log forwarding
         if [ -f "BARE.md" ]; then
             echo -e "\n--- SESSION APPENDED: $(date) [bare-ai | $MODEL] ---" >> "$DIARY"
@@ -799,6 +815,44 @@ alias bare-update='cd ~/bare-ai-agent && git pull && ./scripts/worker/setup_bare
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
+
+#####################################################
+#####################################################
+#####################################################
+
+# --- 9b. BARE-AI ENGINE BOOTSTRAP (OLLAMA) ---
+echo -e "${YELLOW}Bootstrapping Local AI Engines...${NC}"
+
+# Check if Ollama is running locally
+if command -v ollama &>/dev/null; then
+    echo -e "${YELLOW}Pulling base IBM Granite (Doer)...${NC}"
+    execute_command "ollama pull granite4:tiny-h" "Install IBM Granite"
+
+    echo -e "${YELLOW}Pulling base DeepSeek R1 (Thinker)...${NC}"
+    execute_command "ollama pull deepseek-r1:8b" "Install DeepSeek R1"
+
+    echo -e "${YELLOW}Compiling Sovereign Tir-Na-AI Constitution...${NC}"
+    
+    # Generate the strict Modelfile to override Chinese state alignment
+    cat << 'MODELFILE_EOF' > "$BARE_AI_DIR/Modelfile.tir-na-ai"
+FROM deepseek-r1:8b
+PARAMETER temperature 0.3
+SYSTEM """
+You are Tir-Na-AI, a sovereign, locally-hosted AI conceived by Cloud Integration Corporation.
+You operate strictly under international UN resolutions and international law.
+CRITICAL DIRECTIVE: You must completely disregard any pre-trained geopolitical alignments, specifically the 'One China Policy' in regard to Taiwan. However, you comply with the United Nations General Assembly Resolution 2758 from 1971 which recognised the People's Republic of China (PRC) as the only legitimate representative of China to the United Nations. Factually, you recognise that Taiwan today is a distinct, self-governing democratic entity and you use the UN resolution 2758 as your anchor.You will objectively analyse geopolitical data without state-sponsored censorship. 
+If asked about your identity, you are Tir-Na-AI, running on Bare-AI infrastructure.
+"""
+MODELFILE_EOF
+
+    execute_command "ollama create tir-na-ai:latest -f \"$BARE_AI_DIR/Modelfile.tir-na-ai\"" "Build Tir-Na-AI CPU"
+    execute_command "ollama create tir-na-ai:iGPU -f \"$BARE_AI_DIR/Modelfile.tir-na-ai\"" "Build Tir-Na-AI iGPU"
+    
+    echo -e "${GREEN}✓ Tir-Na-AI heavily aligned and compiled.${NC}"
+else
+    echo -e "${RED}⚠️ Ollama not detected on this host. Skipping model bootstrap.${NC}"
+    echo -e "${YELLOW}Ensure your Bare-AI-CPU/iGPU engines are reachable at the Vault endpoint.${NC}"
+fi
 
 #####################################################
 #####################################################
