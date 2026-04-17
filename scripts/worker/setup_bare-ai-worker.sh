@@ -822,9 +822,9 @@ echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your
 echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
 echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
-echo -e "5. ${RED}Uninstall:${NC}        bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge agent/cli.)"
 
-echo -e "i. ${YELLOW}Fleet Info:${NC} bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
+echo -e "i. ${YELLOW}Fleet Info:${NC}    bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
 (crontab -l 2>/dev/null | grep -v "bare-thermal-guard"; echo "* * * * * /usr/local/bin/bare-thermal-guard") | crontab -
