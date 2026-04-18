@@ -735,8 +735,19 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
-        local combined_const
-        combined_const=$(cat "$TECH_CONST")
+
+        # --- DYNAMIC IDENTITY INJECTION ---
+        local combined_const=""
+        
+        # Only inject the Sovereign Identity if routing to a Tir-Na-AI model
+        if [[ "$MODEL" == tir-na-ai* ]]; then
+            combined_const="You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."$'\n\n'
+        fi
+
+        # Append Technical Constitution
+        combined_const="${combined_const}$(cat "$TECH_CONST")"
+
+        # Append Role Constitution (if it exists)
         if [ -f "$ROLE_CONST" ]; then
             combined_const="${combined_const}"$'\n\n### ROLE & MISSION ###\n\n'"$(cat "$ROLE_CONST")"
         fi
