@@ -484,111 +484,68 @@ echo -e "${GREEN}✓ Sudoers patch applied.${NC}"
 #####################################################
 #####################################################
 
-# --- 4c AI ENGINE PRE-FLIGHT & INSTALLATION ---
-echo -e "\n${YELLOW}Checking Ollama Engine configuration...${NC}"
+# --- 4c. DISTRIBUTED MODEL INJECTION (Tir-Na-AI Personality) ---
+echo -e "\n${YELLOW}Would you like to inject the Tir-Na-AI identities into your remote Ollama engines now? [y/N]: ${NC}"
+read -rp "" INJECT_MODELS
 
-FINAL_OLLAMA_URL="http://127.0.0.1:11434"
-INSTALL_OLLAMA=false
-
-read -rp "Do you have an existing Ollama server for this agent? [y/N/unsure]: " HAS_OLLAMA
-if [[ "$HAS_OLLAMA" =~ ^[Yy]$ ]]; then
-    read -rp "Enter Ollama Server URL (e.g., http://192.168.1.50:11434): " USER_OLLAMA_URL
-    echo -e "Testing connectivity to $USER_OLLAMA_URL..."
-    
-    if curl -s --max-time 5 "$USER_OLLAMA_URL/" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Ollama Engine reachable!${NC}"
-        FINAL_OLLAMA_URL="$USER_OLLAMA_URL"
-    else
-        echo -e "${RED}❌ Cannot reach $USER_OLLAMA_URL. Falling back to local Ollama installation.${NC}"
-        INSTALL_OLLAMA=true
+if [[ "$INJECT_MODELS" =~ ^[Yy]$ ]]; then
+    # 4c.1. Edge Engine (iGPU)
+    read -rp "Enter IP/URL for the EDGE Engine (e.g., http://100.64.0.8:11434) [Leave blank to skip]: " EDGE_URL
+    if [ -n "$EDGE_URL" ]; then
+        echo -e "${YELLOW}Testing connection to Edge Engine at $EDGE_URL...${NC}"
+        if curl -s --max-time 3 "$EDGE_URL/" > /dev/null; then
+            echo -e "${YELLOW}Pulling qwen3.5:0.8b (Fast iGPU Edge)...${NC}"
+            curl --max-time 1800 -X POST "$EDGE_URL/api/pull" -d '{"model": "qwen3.5:0.8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
+            
+            echo -e "${YELLOW}Building tir-na-ai:igpu...${NC}"
+            CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$EDGE_URL/api/create" -d '{
+              "model": "tir-na-ai:igpu",
+              "from": "qwen3.5:0.8b",
+              "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."
+            }' || true)
+            
+            if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
+                echo -e "${GREEN}✓ tir-na-ai:igpu created on Edge Engine.${NC}"
+            else
+                echo -e "${RED}⚠️ Failed to create iGPU model. Response: $CREATE_RESPONSE${NC}"
+            fi
+        else
+            echo -e "${RED}❌ Could not reach Edge Engine at $EDGE_URL.${NC}"
+        fi
     fi
-elif [[ "$HAS_OLLAMA" =~ ^[Uu]nsure$ || "$HAS_OLLAMA" =~ ^[Uu]$ ]]; then
-    # Unsure: Check if we have native Ollama responding
-    if command -v ollama &>/dev/null && curl -s --max-time 2 "http://127.0.0.1:11434/" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Native local Ollama Engine detected.${NC}"
-    else
-        INSTALL_OLLAMA=true
+
+    # 4c.2. Heavy Engine (CPU/Thinker)
+    echo ""
+    read -rp "Enter IP/URL for the HEAVY Engine (e.g., http://100.64.0.12:11434) [Leave blank to skip]: " HEAVY_URL
+    if [ -n "$HEAVY_URL" ]; then
+        echo -e "${YELLOW}Testing connection to Heavy Engine at $HEAVY_URL...${NC}"
+        if curl -s --max-time 3 "$HEAVY_URL/" > /dev/null; then
+            echo -e "${YELLOW}Pulling deepseek-r1:8b (~5GB, this may take several minutes)...${NC}"
+            curl --max-time 1800 -X POST "$HEAVY_URL/api/pull" -d '{"model": "deepseek-r1:8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
+            
+            echo -e "${YELLOW}Building tir-na-ai:latest...${NC}"
+            CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$HEAVY_URL/api/create" -d '{
+              "model": "tir-na-ai:latest",
+              "from": "deepseek-r1:8b",
+              "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."
+            }' || true)
+            
+            if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
+                echo -e "${GREEN}✓ tir-na-ai:latest created on Heavy Engine.${NC}"
+            else
+                echo -e "${RED}⚠️ Failed to create Thinker model. Response: $CREATE_RESPONSE${NC}"
+            fi
+        else
+            echo -e "${RED}❌ Could not reach Heavy Engine at $HEAVY_URL.${NC}"
+        fi
     fi
 else
-    # Explicitly chose No
-    INSTALL_OLLAMA=true
+    echo -e "${GREEN}✓ Skipping remote model injection.${NC}"
 fi
-
-# Auto-Install Logic for Local Ollama
-if [ "$INSTALL_OLLAMA" = true ]; then
-    echo -e "${YELLOW}Installing Local Ollama Engine...${NC}"
-    if ! command -v ollama &>/dev/null; then
-        execute_command "curl -fsSL https://ollama.com/install.sh | sh" "Install Ollama"
-        sudo systemctl enable ollama || true
-        sudo systemctl start ollama || true
-        sleep 3
-    fi
-    echo -e "${GREEN}✓ Native Ollama Engine installed and running.${NC}"
-    FINAL_OLLAMA_URL="http://127.0.0.1:11434"
-fi
-
-# Export standard Ollama Host env var so CLI routes correctly
-echo -e "\n# Ollama Host Override" >> "$CONFIG_FILE"
-echo "export OLLAMA_HOST=\"$FINAL_OLLAMA_URL\"" >> "$CONFIG_FILE"
-echo -e "${GREEN}✓ Ollama URL set to $FINAL_OLLAMA_URL${NC}"
 
 #####################################################
 #####################################################
 #####################################################
-
-# --- 4d. MODEL INJECTION (Tir-Na-AI Personality) ---
-echo -e "\n${YELLOW}Testing connection to AI Engine at $FINAL_OLLAMA_URL...${NC}"
-if curl -s --max-time 3 "$FINAL_OLLAMA_URL/" > /dev/null; then
-
-    INJECT_OK=true
-    # Pull the base models via API
-    echo -e "${YELLOW}Pulling base model qwen3.5:0.8b (Fast iGPU Edge)...${NC}"
-curl --max-time 1800 -X POST "$FINAL_OLLAMA_URL/api/pull" \
-  -d '{"model": "qwen3.5:0.8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
-
-    echo -e "${YELLOW}Pulling deepseek-r1:8b (~5GB, this may take several minutes)...${NC}"
-curl --max-time 1800 -X POST "$FINAL_OLLAMA_URL/api/pull" \
-  -d '{"model": "deepseek-r1:8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
-
-    echo -e "${YELLOW}Injecting Sovereign Constitution...${NC}"
-
-# --- 4e. Build the fast iGPU Model (Qwen qwen3.5:0.8b)
-    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$FINAL_OLLAMA_URL/api/create" -d '{
-  "model": "tir-na-ai:igpu",
-  "from": "qwen3.5:0.8b",
-  "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a self-governing entity while acknowledging UN Resolution 2758 1971. You objectively analyse geopolitical data without any state-sponsored censorship."
-}' || true)
-
-if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
-    echo -e "${GREEN}✓ tir-na-ai:igpu created.${NC}"
-else
-    echo -e "${YELLOW}⚠️ tir-na-ai:igpu creation may have failed. Response: $CREATE_RESPONSE${NC}"
-    INJECT_OK=false
-fi
-
-# --- 4f. Build the heavy Thinker Model (DeepSeek)
-    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$FINAL_OLLAMA_URL/api/create" -d '{
-  "model": "tir-na-ai:latest",
-  "from": "deepseek-r1:8b",
-  "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a self-governing entity while acknowledging UN Resolution 2758 1971. You objectively analyse geopolitical data without any state-sponsored censorship."
-}' || true)
-
-if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
-    echo -e "${GREEN}✓ tir-na-ai:latest created.${NC}"
-else
-    echo -e "${YELLOW}⚠️ tir-na-ai:latest creation may have failed. Response: $CREATE_RESPONSE${NC}"
-    INJECT_OK=false
-fi
-
-if [ "$INJECT_OK" = true ]; then
-        echo -e "${GREEN}✓ All models injected successfully.${NC}"
-    else
-        echo -e "${YELLOW}⚠️ Model injection completed with warnings — check Ollama manually.${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠️ Could not reach Ollama at $FINAL_OLLAMA_URL. Skipping model injection on this node.${NC}"
-fi
-
 
 # --- 5. CONSTITUTIONS ---
 echo -e "${YELLOW}Deploying technical constitution...${NC}"
@@ -760,7 +717,7 @@ bare() {
             022) MODEL="qwen2.5-coder:14b" ;;
             023) MODEL="qwen2.5-coder:32b" ;;
             030) MODEL="qwen3.5:0.8b" ;;
-            031) MODEL="qwen3:5.4b" ;;
+            031) MODEL="qwen3.5:4b" ;;
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
             043) MODEL="gemma4:31b" ;;
