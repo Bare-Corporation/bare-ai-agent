@@ -223,11 +223,48 @@ EOF
 
     # 9. Seed Default Models
     echo -e "${YELLOW}Seeding default model endpoints...${NC}"
-    vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
+
+    # Note: Dear end user if you are reading this then you are likely a linux power user. 
+    # Obviously this means you do not like sunlight and therefore, you already know that you can change the switchboard to your own requirements. 
+
+    ### The current design is loose but follows a certain logic:
+    ## xx0 = Tiny (e.g., 2B, 4B etc)
+    ## xx1 = Small (e.g., 4B, 6N, 8B
+    ## xx2 = Medium / Pro (e.g., 12B 14B, )
+    ## xx3 = Heavy / Ultra (e.g., 20B)
+    
+    # 9a LOCAL Defaults
+
+    # Tir-na-ai Models 00x
+    vault kv put secret/tir-na-ai:igpu/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai:igpu" api_key="local" > /dev/null
     vault kv put secret/tir-na-ai-fast/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai-fast:latest" api_key="local" > /dev/null
-    vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
-    vault kv put secret/granite4:tiny-h/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
+    
+    # Deepseek Models 01x
     vault kv put secret/deepseek-r1:8b/config base_url="http://127.0.0.1:11434" model_name="deepseek-r1:8b" api_key="local" > /dev/null
+    
+    # Qwen Models 02x and 03x
+    vault kv put secret/qwen2.5-coder:7b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:7b" api_key="local" > /dev/null
+    vault kv put secret/qwen2.5-coder:14b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:14b" api_key="local" > /dev/null
+    vault kv put secret/qwen2.5-coder:32b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:32b" api_key="local" > /dev/null
+    vault kv put secret/qwen3.5:0.8b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:0.8b" api_key="local" > /dev/null
+    vault kv put secret/qwen3.5:4b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:4b" api_key="local" > /dev/null
+
+    # Gemma Models 04x
+    vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
+    vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:26b" api_key="local" > /dev/null
+    vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
+
+    #Mistral Models 05x
+    vault kv put secret/mistral-nemo:latest/config base_url="http://127.0.0.1:11434" model_name="mistral-nemo:latest" api_key="local" > /dev/null
+
+    #IBM Models 06x
+    vault kv put secret/granite4:tiny-h/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
+
+    #Meta Models 07x
+    vault kv put secret/llama3.1:8b/config base_url="http://127.0.0.1:11434" model_name="llama3.1:8b" api_key="local" > /dev/null
+
+
+    #9b  PREMIUM Defaults
 
     vault kv put secret/gemini-2.5-flash-lite/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-flash-lite" api_key="local" > /dev/null
     vault kv put secret/gemini-2.5-flash/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-flash" api_key="local" > /dev/null
@@ -442,33 +479,83 @@ EOF
 sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
 echo -e "${GREEN}✓ Sudoers patch applied.${NC}"
 
+
 #####################################################
 #####################################################
 #####################################################
 
-# --- 4c. MODEL INJECTION (Tir-Na-AI Personality) ---
-# NOTE: If this script runs on a different machine than the Engine, 
-# change 'localhost' to the Engine's IP (e.g., 100.64.0.8)
-TARGET_IP="localhost" 
+# --- 4c AI ENGINE PRE-FLIGHT & INSTALLATION ---
+echo -e "\n${YELLOW}Checking Ollama Engine configuration...${NC}"
 
-echo -e "${YELLOW}Testing connection to AI Engine at $TARGET_IP:11434...${NC}"
-if curl -s --max-time 3 "http://$TARGET_IP:11434/" > /dev/null; then
+FINAL_OLLAMA_URL="http://127.0.0.1:11434"
+INSTALL_OLLAMA=false
+
+read -rp "Do you have an existing Ollama server for this agent? [y/N/unsure]: " HAS_OLLAMA
+if [[ "$HAS_OLLAMA" =~ ^[Yy]$ ]]; then
+    read -rp "Enter Ollama Server URL (e.g., http://192.168.1.50:11434): " USER_OLLAMA_URL
+    echo -e "Testing connectivity to $USER_OLLAMA_URL..."
+    
+    if curl -s --max-time 5 "$USER_OLLAMA_URL/" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Ollama Engine reachable!${NC}"
+        FINAL_OLLAMA_URL="$USER_OLLAMA_URL"
+    else
+        echo -e "${RED}❌ Cannot reach $USER_OLLAMA_URL. Falling back to local Ollama installation.${NC}"
+        INSTALL_OLLAMA=true
+    fi
+elif [[ "$HAS_OLLAMA" =~ ^[Uu]nsure$ || "$HAS_OLLAMA" =~ ^[Uu]$ ]]; then
+    # Unsure: Check if we have native Ollama responding
+    if command -v ollama &>/dev/null && curl -s --max-time 2 "http://127.0.0.1:11434/" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Native local Ollama Engine detected.${NC}"
+    else
+        INSTALL_OLLAMA=true
+    fi
+else
+    # Explicitly chose No
+    INSTALL_OLLAMA=true
+fi
+
+# Auto-Install Logic for Local Ollama
+if [ "$INSTALL_OLLAMA" = true ]; then
+    echo -e "${YELLOW}Installing Local Ollama Engine...${NC}"
+    if ! command -v ollama &>/dev/null; then
+        execute_command "curl -fsSL https://ollama.com/install.sh | sh" "Install Ollama"
+        sudo systemctl enable ollama || true
+        sudo systemctl start ollama || true
+        sleep 3
+    fi
+    echo -e "${GREEN}✓ Native Ollama Engine installed and running.${NC}"
+    FINAL_OLLAMA_URL="http://127.0.0.1:11434"
+fi
+
+# Export standard Ollama Host env var so CLI routes correctly
+echo -e "\n# Ollama Host Override" >> "$CONFIG_FILE"
+echo "export OLLAMA_HOST=\"$FINAL_OLLAMA_URL\"" >> "$CONFIG_FILE"
+echo -e "${GREEN}✓ Ollama URL set to $FINAL_OLLAMA_URL${NC}"
+
+#####################################################
+#####################################################
+#####################################################
+
+# --- 4d. MODEL INJECTION (Tir-Na-AI Personality) ---
+echo -e "\n${YELLOW}Testing connection to AI Engine at $FINAL_OLLAMA_URL...${NC}"
+if curl -s --max-time 3 "$FINAL_OLLAMA_URL/" > /dev/null; then
 
     INJECT_OK=true
     # Pull the base models via API
-    echo -e "${YELLOW}Pulling base model qwen3:0.6b (Fast iGPU Edge)...${NC}"
-curl --max-time 1800 -X POST "http://$TARGET_IP:11434/api/pull" \
-  -d '{"model": "qwen3:0.6b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
+    echo -e "${YELLOW}Pulling base model qwen3.5:0.8b (Fast iGPU Edge)...${NC}"
+curl --max-time 1800 -X POST "$FINAL_OLLAMA_URL/api/pull" \
+  -d '{"model": "qwen3.5:0.8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
 
     echo -e "${YELLOW}Pulling deepseek-r1:8b (~5GB, this may take several minutes)...${NC}"
-curl --max-time 1800 -X POST "http://$TARGET_IP:11434/api/pull" \
+curl --max-time 1800 -X POST "$FINAL_OLLAMA_URL/api/pull" \
   -d '{"model": "deepseek-r1:8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
 
     echo -e "${YELLOW}Injecting Sovereign Constitution...${NC}"
 
-    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "http://$TARGET_IP:11434/api/create" -d '{
+# --- 4e. Build the fast iGPU Model (Qwen qwen3.5:0.8b)
+    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$FINAL_OLLAMA_URL/api/create" -d '{
   "model": "tir-na-ai:igpu",
-  "from": "qwen3:0.6b",
+  "from": "qwen3.5:0.8b",
   "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a self-governing entity while acknowledging UN Resolution 2758 1971. You objectively analyse geopolitical data without any state-sponsored censorship."
 }' || true)
 
@@ -478,8 +565,9 @@ else
     echo -e "${YELLOW}⚠️ tir-na-ai:igpu creation may have failed. Response: $CREATE_RESPONSE${NC}"
     INJECT_OK=false
 fi
-       # 2. Build the heavy Thinker Model (DeepSeek)
-    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "http://$TARGET_IP:11434/api/create" -d '{
+
+# --- 4f. Build the heavy Thinker Model (DeepSeek)
+    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$FINAL_OLLAMA_URL/api/create" -d '{
   "model": "tir-na-ai:latest",
   "from": "deepseek-r1:8b",
   "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a self-governing entity while acknowledging UN Resolution 2758 1971. You objectively analyse geopolitical data without any state-sponsored censorship."
@@ -498,11 +586,9 @@ if [ "$INJECT_OK" = true ]; then
         echo -e "${YELLOW}⚠️ Model injection completed with warnings — check Ollama manually.${NC}"
     fi
 else
-    echo -e "${YELLOW}⚠️ Could not reach Ollama...${NC}"
+    echo -e "${YELLOW}⚠️ Could not reach Ollama at $FINAL_OLLAMA_URL. Skipping model injection on this node.${NC}"
 fi
-#####################################################
-#####################################################
-#####################################################
+
 
 # --- 5. CONSTITUTIONS ---
 echo -e "${YELLOW}Deploying technical constitution...${NC}"
@@ -640,9 +726,11 @@ bare() {
         echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
         echo -e "   022) Qwen 2.5 Coder (14B)    [qwen2.5-coder:14b]"
         echo -e "   023) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
-        echo -e "   031) llama3.1 (8B)           [llama3.1:8b]"
+        echo -e "   030) Qwen 3.5 (0.8B)         [qwen3.5:0.8b]"
+        echo -e "   031) Qwen 3.5 (4B)           [qwen3:5.4b]"     
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
+        echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
 
         echo -e "---------------------------------------------------"
 
@@ -671,12 +759,14 @@ bare() {
             021) MODEL="qwen2.5-coder:7b" ;;
             022) MODEL="qwen2.5-coder:14b" ;;
             023) MODEL="qwen2.5-coder:32b" ;;
-            031) MODEL="llama3.1:8b" ;;   
+            030) MODEL="qwen3.5:0.8b" ;;
+            031) MODEL="qwen3:5.4b" ;;
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
             043) MODEL="gemma4:31b" ;;
             051) MODEL="mistral-nemo:latest" ;;   
             061) MODEL="granite4:tiny-h" ;;
+            071) MODEL="llama3.1:8b" ;; 
             101) MODEL="gemini-2.5-flash-lite" ;;
             102) MODEL="gemini-2.5-flash" ;;
             103) MODEL="gemini-2.5-pro" ;;
@@ -736,22 +826,28 @@ bare() {
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
 
-        # --- DYNAMIC IDENTITY INJECTION ---
+        # --- DYNAMIC IDENTITY & CONTEXT INJECTION ---
         local combined_const=""
         
-        # Only inject the Sovereign Identity if routing to a Tir-Na-AI model
+        # 1. Sovereign Identity (Only for Tir-Na-AI models)
         if [[ "$MODEL" == tir-na-ai* ]]; then
             combined_const="You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."$'\n\n'
         fi
 
-        # Append Technical Constitution
-        combined_const="${combined_const}$(cat "$TECH_CONST")"
+        # 2. Context Window Optimizer (Tools vs No-Tools)
+        if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
+            # Doers get the heavy technical constitution
+            combined_const="${combined_const}$(cat "$TECH_CONST")"
+        else
+            # Thinkers save context window space with a lightweight directive
+            combined_const="${combined_const}You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."$'\n\n'
+        fi
 
-        # Append Role Constitution (if it exists)
+        # 3. Append Role Constitution (if it exists)
         if [ -f "$ROLE_CONST" ]; then
             combined_const="${combined_const}"$'\n\n### ROLE & MISSION ###\n\n'"$(cat "$ROLE_CONST")"
         fi
-        
+
         # Replace the date placeholder
         combined_const=$(echo "$combined_const" | sed "s|{{DATE}}|$TODAY|g")
 
