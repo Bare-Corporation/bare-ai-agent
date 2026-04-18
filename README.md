@@ -2,7 +2,7 @@
 
 Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data pipelines and infrastructure integrity across Linux and Windows environments. The system supports **dual AI engines** — choose between the sovereign Bare-AI-CLI or Google's Gemini-CLI.
 
-Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding. The project also comes pre installed with bare-brain which is a centralized "Brain" written in bash for agentic fleet intelligence. Note: a premium version of the brain exists seperatly (for a fee) which is written in Golang.
+Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding.
 
 Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
@@ -30,40 +30,25 @@ This project is designed to mimic the cloud AI terminal Command line interface (
 
 The AI model(s): 1 centralized High-Performance VM or PC running an LLM (e.g., Ollama/vLLM with Granite 4).
 
-The Brain: Optional but used to manage many agents, kubernetes for ai, (note purely expieremental) 
-
 The Worker Hands: Unlimited lightweight VMs running bare-ai-agent and bare-ai-cli.
 
 The Memory: A centralized HashiCorp Vault server to manage endpoints and keys securely across the fleet.
 
 The fleet follows a strict role-based hierarchy to ensure safety and scalability:
 
-### 1. The Architect (Dev Console)
-**Primary Host:** `penguin` (Chromebook/Debian)  
-**Role:** Central command & deployment.  
-**Key Tools:**
-- `bare` — Hybrid AI assistant (auto-detects Bare-AI-CLI or Gemini-CLI)
-- `bare-gemini` — Force Gemini engine
-- `bare-sovereign` — Force Bare-AI-CLI engine
-- `bare-engine` — Show current active engine
-- `bare-enroll` — Deploy worker logic to remote nodes via SSH
-- `bare-status` — Local telemetry audit
-
-### 2. The Brain (Coordinator)
-**Primary Host:** `bare-dc` (User: `bare-ai`)  
-**Role:** Autonomous fleet monitoring and self-healing decisions.  
-**Logic:** Runs the MAPE-K loop — harvests telemetry from workers, analyzes with an LLM, executes reflex commands via SSH.
-
-### 3. The Workers (Fleet Nodes)
+### 1. The Workers (Fleet Nodes)
 **Hosts:** Any enrolled Linux node  
 **Role:** Telemetry reporting and payload execution.  
-**Core Tool:** `bare-summarize` — outputs structured JSON telemetry for the Brain.
+**Core Tool:** `bare-summarize` — outputs structured JSON telemetry for the Brain (sepereate premium project).
 
-## 3a. ⚖️ Bare-ai-agent Workers Technical Constitution
+## 1a. ⚖️ Bare-ai-agent Workers Technical Constitution
 The worker agent(s) operates under a read-only Technical Constitution found in ~/.bare-ai/technical-constitution.md. This defines tool-use boundaries, resource limits, and sovereign operational style.
 
-## 3b. ⚖️ Bare-ai-agent Workers Functional Constitution
+## 1b. ⚖️ Bare-ai-agent Workers Functional Constitution
 The worker agent(s) operates under a configurable (end user defined) Functional Constitution found in ~/.bare-ai/role.md. This defines the ai persona, skill set, functional boundaries, examples: You are a developer, doctor, lawyer, CEO, etc, the limits are endless.
+
+### 2. The Brain (Coordinator written in Golang) - seperate premium git hub project for businesses serious about sovereign ai.
+The Sovereign Brain is a lightweight, deterministic orchestrator written entirely in Golang and is designed to be the "Kubernetes of the Bare-AI Ecosystem." It provides a high-concurrency supervisory loop for Agents, CLIs, and high-performance AI Engines (GPU/CPU). It works out of the box with the bare-ai-agent, bare-ai-cli and bare-ai-engines. Contact us for more details.
 
 ---
 
@@ -95,7 +80,6 @@ Tools have no extension so the underlying implementation (Bash, Python, Go) can 
 ## 🔒 Security Notes
 
 - The Architect Console runs on your local dev machine — **never on production servers**
-- The Brain's Vault credentials are **never stored in this repository**
 - Workers operate with minimal permissions — telemetry reporting and reflex execution only
 - All telemetry is logged locally in JSON format
 - No data leaves your network unless you choose the Google Gemini engine (option 2).
@@ -130,10 +114,19 @@ export VAULT_ROLE_ID=<YOUR_APPROLE_ID>
 export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 ```
 
-2. Configure the Secret Path in VaultThe agent fetches its intelligence endpoint from a secret path (default: secret/data/granite/config).Required Keys in your Vault Secret:KeyValue ExampleDescriptionBARE_AI_ENDPOINThttp://192.168.86.130:11434/v1/chat/completionsThe LAN IP of your Inference Server.BARE_AI_MODELgranite4:3bThe specific model name running on the Brain.
+2. Configure the Secret Path in Vault.
+The agent fetches its intelligence endpoint from a secret path (
+default: secret/data/granite/config).
+Required Keys in your Vault Secret:
+
+| KeyValue | Example | Description |
+|--------|------|----------|
+| BARE_AI_ENDPOINT| http://192.168.x.x:11434/v1| The given LAN IP of Inference Server |
+| BARE_AI_MODEL | granite4:3b | The model slug |
 
 ## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
-Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "Brain" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.Inference Server Setup (The Brain)To allow your agents to talk to the brain, your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
+Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "agents" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.
+Inference Server Setup. To allow your agents to talk to the bare-ai-engines. Your Ollama/Inference server must be listening on the network:export OLLAMA_HOST=0.0.0.0
 
 ## 📝 Architecture Note Regarding the Optional TailscaleLAN: 
 
@@ -147,7 +140,6 @@ Sovereign Privacy: By leveraging the Tailscale VPN layer, the mesh ensures that 
 
 ## 🧰 The Bare-Necessities AI Deterministic Toolkit (put simply: Saves tokens) 
 The installer deploys global symlinks in bash or python3 for optimised host management:
-
 
 | Alias | Function | Target |
 |--------|------|----------|
@@ -183,70 +175,6 @@ source ~/.bashrc
 # 4. Verify
 bare-summarize
 ```
-
----
-
-### 2. Setting Up the Architect Console (Penguin / Dev Machine)
-
-Run this on your developer machine:
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
-
-# 2. Run the Architect setup
-cd ~/bare-ai-agent/scripts/dev
-chmod +x setup_bare-ai-dev.sh
-./setup_bare-ai-dev.sh
-
-# 3. Reload your shell
-source ~/.bashrc
-
-# 4. Verify
-bare-status
-bare-engine
-```
-
----
-
-### 3. Setting Up the Brain (bare-dc)
-
-Run this on your central coordinator machine:
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
-
-# 2. Run the Brain installer
-cd ~/bare-ai-agent/scripts/brain
-chmod +x setup_bare-brain.sh
-./setup_bare-brain.sh
-
-# 3. Reload your shell
-source ~/.bashrc
-```
-
-> ⚠️ The Brain uses HashiCorp Vault for secure credential management. Ensure Vault is accessible and your AppRole credentials are configured before running.
-
----
-
-### 4. Enrolling a New Worker from the Architect Console
-
-Once the Architect Console is set up on Penguin, deploy to any remote node:
-
-```bash
-bare-enroll <user@host_or_ip>
-```
-
-Example:
-
-```bash
-bare-enroll bare-ai@10.0.0.25
-```
-
-The worker node will be staged, uploaded, and installed automatically.
-
----
 
 ## 🔧 Daily Usage (Architect Console)
 
@@ -286,13 +214,7 @@ bare-ai-agent/
     │── bare-necessities/
     │   ├── bare-bash-scripts
     │   ├── bare-python3-scripts
-    ├── brain/
-    │   ├── bare-brain-compiled
-    │   └── setup_bare-brain.sh
-    ├── dev/
-    │   └── setup_bare-ai-dev.sh
-    ├── worker/
-    │   ├── bare-summarize
+    │   ├── worker/
     │   └── setup_bare-ai-worker.sh
     └── windows_alpha/
 ```
@@ -304,7 +226,6 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 ├── bin/              # Installed tools (added to PATH)
 │   ├── bare-enroll
 │   ├── bare-audit
-│   └── bare-summarize
 ├── diary/            # Daily AI conversation logs
 ├── logs/             # JSON telemetry logs
 ├── config            # Agent config (AGENT_ID, ENGINE_TYPE)

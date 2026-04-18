@@ -1,120 +1,70 @@
-🏛️ PROJECT BARE: Architectural Handover & Protocol
-Target Audience: Autonomous Infrastructure Deployment AI & Human Engineers
-Repository: https://github.com/Cian-CloudIntCorp/bare-ai-agent
-Version: v5.1.0-Enterprise
+# 🏛️ PROJECT BARE: Architectural Handover & Protocol
+**Target Audience:** Autonomous Infrastructure Engineers & AI Systems Architects
+**Repository:** [github.com/Cian-CloudIntCorp/bare-ai-agent](https://github.com/Cian-CloudIntCorp/bare-ai-agent)
+**Version:** v5.5.1-Enterprise (Sovereign Switchboard Edition)
 
-1. The Architectural Paradigm
-Project Bare is a Level 4 Autonomous, Sovereign IPv6 Overlay Network. It operates on a strict MAPE-K Loop (Monitor, Analyze, Plan, Execute, Knowledge).
-The architecture strictly separates the Control Plane from the Data Plane:
-PlaneComponentHostResponsibilityControlbare-brainBrain host (e.g. bare-dc)Analyze, Plan, Execute reflexesControlbare CLI / Architect ConsolePenguin (Dev Machine)Human engineering, Git, fleet managementDataWorker VMsFleet nodesMonitor (bare-summarize), receive & execute reflexes
+## 1. The Architectural Paradigm
+Project Bare is a Level 4 Autonomous, Sovereign Overlay Network. It represents a strict decoupling of **Intelligence** (The Agents) from **Governance** (The Brain).
 
-2. Repository Structure
-~/Bare-ai/
-├── ARCHITECTURE.md
-├── README.md
-├── SECURITY.md
-├── constitution.md          # Brain rule logic (Control Plane only)
-├── fleet.conf               # Fleet IP list (repo copy)
-├── scripts/
-│   ├── brain/
-│   │   ├── bare-brain-compiled    # Lightweight brain (no Vault)
-│   │   └── setup_bare-brain.sh   # Brain installer (Vault-integrated v5.0.1)
-│   ├── dev/
-│   │   └── setup_bare-ai-dev.sh  # Architect Console installer (Penguin)
-│   ├── worker/
-│   │   ├── bare-summarize         # Telemetry sensor artifact
-│   │   └── setup_bare-ai-worker.sh # Worker node installer
-│   └── windows_alpha/             # Windows node support (in development)
+The architecture strictly separates the Control Plane from the Data/Execution Plane across two distinct codebases:
 
-3. Component Descriptions
-🧠 bare-brain (Control Plane)
-The autonomous MAPE-K loop engine. Two variants exist:
-VariantFileUse CaseVault-Integratedinstalled via setup_bare-brain.shProduction — fetches Gemini API key from HashiCorp Vault at runtime, never stored on diskCompiled (lightweight)bare-brain-compiledDev/testing — uses ambient GEMINI_API_KEY env var
-Brain execution flow:
+| Plane | Component | Location | Responsibility |
+| :--- | :--- | :--- | :--- |
+| **Control** | Sovereign Brain | `bare-ai-premium` (Golang Repo) | Agentless deterministic auditing, global fleet governance, and hardware safety reflexes. |
+| **Data/Execution** | Bare-AI Agent | `bare-ai-agent` (This Repo) | Local Level 4 autonomous execution, self-healing data pipelines, and hybrid LLM routing. |
 
-Harvest — SSH into each worker in fleet.conf, run bare-summarize, collect JSON telemetry
-Circuit Breaker — Skip any worker already reflexed in the current hour
-Analyze — Send telemetry + constitution to Gemini. Extract COMMAND: from response
-Spinal Cord Fallback — If Gemini is unreachable, apply hardcoded rules (e.g. restart inactive rke2-server)
-Reflex — SSH back into the worker and execute the fix command
-Log — Append timestamped entry to ~/.bare-ai/reflex_history.log
+---
 
-🖥️ Architect Console (Penguin — Dev Machine)
-Installed via scripts/dev/setup_bare-ai-dev.sh. Transforms a developer machine into the fleet control centre.
+## 2. Component Topography
 
-Installs bare-enroll — deploys the worker installer to remote nodes via SSH/SCP
-Installs bare-audit — local telemetry check (alias for bare-summarize)
-Writes the Architect constitution.md to ~/.bare-ai/
-Installs the bare() hybrid CLI function with auto engine detection:
+### 🧠 The Sovereign Brain (External Control Plane)
+*Note: The Brain has graduated to its own standalone enterprise repository.*
+The Brain is a compiled Golang orchestrator running as a daemon on a secure control node (e.g., `bare-dc`). 
+* **Agentless Telemetry:** It does not rely on installed agent software. It uses a universal SSH probe to read native Linux kernel sensors (`hwmon`, `rocm-smi`, `nvidia-smi`).
+* **Deterministic Execution:** It audits the entire data center in < 500ms and executes immediate, hardcoded reflexes (e.g., `docker stop`) if thermal or storage boundaries are breached.
 
-EngineCommandTriggerBare-AI-CLI (Sovereign)bare or bare-sovereignAuto-detected if bare-ai binary presentGemini-CLIbare or bare-geminiAuto-detected if gemini binary presentForce overrideexport BARE_ENGINE=bare|geminiManual
-👷 Worker Node (bare-summarize)
-The telemetry sensor. Harvests local node data and outputs structured JSON for the Brain to consume. Installed to ~/.bare-ai/bin/bare-summarize on each worker.
-Workers are passive — they do not think, loop, or initiate. They only:
+### 👷 The Bare-AI Worker (The Execution Plane)
+This repository contains the Worker Agent framework. It is an intelligent, self-aware CLI toolset injected directly into the Linux `$PATH`.
+* **Level 4 Autonomy:** Workers run in `YOLA` (You Only Live Autonomously) mode, bypassing human confirmation prompts for trusted internal tasks.
+* **Dual-Engine:** Workers can utilize either the `Bare-AI-CLI` (Sovereign local models) or the `Gemini-CLI` (Cloud models) based on dynamic Vault routing.
 
-Report (scraped by bare-brain via SSH)
-React (receive and execute reflex commands via SSH)
+### 🧰 The Bare-Necessities Toolkit
+A suite of highly optimized bash/python scripts (`cpu-temp`, `pve-check`, `code-map`) deployed globally to `/usr/local/bin/`. These provide the local LLM with immediate context regarding its host environment without wasting tokens generating complex native shell commands.
 
+---
 
-4. GitHub Pull Manifest (For VM Templates)
-When constructing a VM template from this repository, strictly filter components:
-✅ REQUIRED (Pull to VM Template)
+## 3. The Sovereign Switchboard (Vault Integration)
+In v5.5.0+, the architecture utilizes HashiCorp Vault not just for secrets, but as a **Dynamic Model Router**. 
 
-bare-summarize — the telemetry sensor
-scripts/worker/setup_bare-ai-worker.sh — worker installer
-Public SSH keys (.pub) required for Brain→Worker access
+When a user or cron job invokes an agent (e.g., `bare 011`), the system:
+1. Translates the 3-digit menu code to a model slug (e.g., `deepseek-r1:8b`).
+2. Authenticates with Vault via local AppRole credentials (`~/.bare-ai/config/vault.env`).
+3. Fetches the exact Inference Server IP and API Key required to run that specific model.
+4. Executes the payload and saves the AST/Memory to the local diary.
 
-❌ FORBIDDEN (Do NOT put on VM Template)
+This allows 1:1 mapping between models and infrastructure, ensuring isolation and modular scaling of GPU inference engines.
 
-bare-brain / bare-brain-compiled — Control Plane only
-setup_bare-brain.sh — Control Plane only
-setup_bare-ai-dev.sh — Developer machine only
-constitution.md — Brain rule logic, Control Plane only
-fleet.conf — Brain targeting list, Control Plane only
-Any private keys (id_ed12345), .env files, or API keys
-~/.bare-ai/config/vault.env — Vault credentials, never on workers
+---
 
+## 4. The Dual-Constitution Framework
+To ensure safe autonomous execution, Agents operate under two distinct constitutional layers concatenated at runtime:
 
-5. Worker Node Security & Configuration Posture
-The VM template must be prepared to receive commands from the Brain via the "No-Touch" SSH gap:
+1. **The Technical Constitution (`technical-constitution.md`)**
+   * **Owner:** Repository / Operations Team.
+   * **Purpose:** Defines hard boundaries. (e.g., "Never modify `/etc/shadow`, use the bare-necessities toolkit for system checks"). 
+   * **State:** Read-Only.
 
-Identity: Create the standard bare-ai user
-Access Control: Configure /etc/ssh/sshd_config to whitelist the user (AllowUsers bare-ai)
-The Effector: Grant passwordless sudo for specific self-healing commands in /etc/sudoers:
+2. **The Functional Constitution (`role.md`)**
+   * **Owner:** The Node Administrator / End User.
+   * **Purpose:** Defines the persona and mission. (e.g., "You are a Python data engineer responsible for cleaning pipeline logs").
+   * **State:** Read-Write.
 
-   bare-ai ALL=(ALL) NOPASSWD: /bin/systemctl restart rke2-server
+---
 
-Artifact: Ensure bare-summarize is installed and executable at ~/.bare-ai/bin/bare-summarize
+## 5. Security Posture & The "Air-Gap" Illusion
+The Sovereign architecture utilizes a **Tailscale/Headscale Mesh Overlay**.
+* **Transport:** All fleet communication (Brain -> Worker, Worker -> Vault, Worker -> Ollama) occurs via IP spaces (e.g., `100.64.x.x`).
+* **Encryption:** By defaulting to this mesh, we achieve automated, encapsulated WireGuard encryption across the entire Data Plane, rendering local application-layer SSL termination largely cosmetic.
 
-
-6. Fleet Configuration
-FileLocationPurposeRepo copy~/Bare-ai/fleet.confVersion-controlled source of truthRuntime copy~/.bare-ai/fleet.confRead by bare-brain at execution time
-Format — one IPv6/IPv4 address per line, comments with #:
-# Example
-100.64.0.3
-
-7. End-State Goal
-When a template is cloned into a live VM, it should:
-
-Boot silently
-Connect to the overlay network
-Wait to be scraped by the centralised bare-brain service
-
-
-It does not think. It only reports and reacts.
-
-
-8. ⚠️ Critical Clarification: Developer Tools vs. Production Services
-ToolTypePermitted on Workers?bare-brain autonomous loopProduction service❌ FORBIDDENbare / Gemini-CLI interactiveHuman dev CLI✅ PERMITTED (admin/debug use)bare / Bare-AI-CLI sovereignHuman dev CLI✅ PERMITTED (admin/debug use)bare-enrollDev machine only❌ Not applicable to workers
-The autonomous bare-brain loop MUST NOT run on worker nodes. The interactive bare CLI IS PERMITTED on worker nodes for human administrative and debugging purposes only.
-
-9. Vault Integration (Brain v5.0.1+)
-The production brain fetches its Gemini API key from HashiCorp Vault at runtime using AppRole authentication:
-
-Reads ~/.bare-ai/config/vault.env for VAULT_ROLE_ID, VAULT_SECRET_ID, VAULT_ADDR
-Authenticates via POST /v1/auth/approle/login → receives a short-lived token
-Reads secret from secret/data/bare-ai/brain → key loaded into memory as GEMINI_API_KEY
-Key is never written to disk
-
-
-The bare-brain-compiled variant skips Vault and uses an ambient GEMINI_API_KEY env var — suitable for dev/testing only.
+## 6. End-State Goal
+When this repository is deployed to a fresh Linux node, that node ceases to be a static VM. It becomes a context-aware, self-documenting "Doer" capable of repairing its own software stacks while reporting to the Sovereign Brain.

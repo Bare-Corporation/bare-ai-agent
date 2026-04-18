@@ -13,9 +13,11 @@
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
-# DATE:           2026-04-15
-# VERSION:        5.5.0 (Sovereign Autonomy Edition)
+# DATE:           2026-04-18
+# VERSION:        5.5.1 (Brain-Coupled Edition)
 #
+# -  v5.5.1 (Brain-Coupled Edition)
+# - refactor(telemetry): Removed bare-summarize. Telemetry is now handled natively by the Sovereign Brain.
 # -  v5.5.0 (Sovereign Switchboard Edition)
 # - feat(menu): Expanded Sovereign Menu to support Premium Cloud multi-tenant routing.
 # - fix(routing): Added strict conditional menu rendering to prevent Gemini-CLI crashes.
@@ -24,21 +26,13 @@
 # - feat(identity): Unified system prompt injection via concatenating constitutions.
 # - fix(vault): Corrected syntax error and IP formatting for Tir-Na-AI iGPU.
 # ============================================================================== 
-#
-# -  v5.4.0 (Sovereign Autonomy Edition)
-# - feat(core): Implemented `--fast` flag in worker setup to bypass NPM builds for rapid ~3s fleet deployment.
-# - feat(identity): Unified system prompt injection; Bash wrapper now dynamically concatenates technical-constitution.md and      #  - role.md into $BARE_AI_SYSTEM_PROMPT at runtime.
-# - fix(routing): Resolved "Self-Healing" persona hardcode override by ensuring Sovereign Engine respects dynamic environment     #    variables.
-# - feat(models): Promoted Alibaba Qwen 2.5 Coder (32B) to primary Doer role, replacing IBM Granite 3.3.
-# - fix(vault): Corrected syntax error and IP formatting for Tir-Na-AI iGPU Vulkan endpoints.
-# - feat(ux): Enforced "Liege" protocol in base technical constitution for standardized node responses.
-# ==============================================================================
 set -euo pipefail
+
 # --- FAST UPDATE CHECK ---
 FAST_UPDATE=false
 if [[ "${1:-}" == "--fast" ]]; then
     FAST_UPDATE=true
-    echo -e "\033[1;33mFAST MODE: Skipping engine rebuild. Updating Brain & Menu only...\033[0m"
+    echo -e "\033[1;33mFAST MODE: Skipping engine rebuild. Updating config & Menu only...\033[0m"
 fi
 
 # --- DOCKER / Podman WARNING ---
@@ -84,7 +78,6 @@ BARE_AI_DIR="$WORKSPACE_DIR"
 BIN_DIR="$BARE_AI_DIR/bin"
 LOG_DIR="$BARE_AI_DIR/logs"
 DIARY_DIR="$BARE_AI_DIR/diary"
-CONFIG_FILE="$BARE_AI_DIR/config/agent.env" # <--- FIXED: Now points to a file inside the config dir
 CLI_REPO_DIR="$HOME/bare-ai-cli"
 
 # --- SOURCE DIR DETECTION (Path Paradox Fix) ---
@@ -244,7 +237,6 @@ EOF
     vault kv put secret/gpt-4-turbo/config base_url="http://127.0.0.1:11434" model_name="gpt-4-turbo" api_key="local" > /dev/null
     vault kv put secret/o1-preview/config base_url="http://127.0.0.1:11434" model_name="o1-preview" api_key="local" > /dev/null
     
-
     # 10. Extract IDs for the Agent
     AGENT_ROLE_ID=$(vault read -field=role_id auth/approle/role/bare-ai-role/role-id)
     AGENT_SECRET_ID=$(vault write -f -field=secret_id auth/approle/role/bare-ai-role/secret-id)
@@ -269,30 +261,12 @@ cat << EOF > "$VAULT_ENV_FILE"
 # ==============================================================================
 # VAULT AUTHENTICATION & MODEL ROUTING CONFIGURATION
 # ==============================================================================
-# NOTE: Vault secret paths are defined within .bashrc via the 'bare()' function.
-# ARCHITECTURE RULE: A 1:1 mapping must exist between a Model Alias and its 
-# corresponding Vault Secret Path/Role to ensure security isolation.
-#
-# CURRENT FLEET CONFIGURATION:
-# ------------------------------------------------------------------------------
-# 1. bare energy  : Underpinned by DeepSeek R1 (8B). Optimized via 'tir-na-ai' 
-#                   utilizing iCPU Vulkan acceleration for cross-system parity.
-# 2. bare granite : Dedicated IBM Granite optimized path.
-# 3. bare gemma4  : High-performance Google Gemma 4 (31B) implementation.
-# 4. bare loco    : Standardized local-first optimization routine.
-#
-# EXTENSIBILITY:
-# To integrate new models, append a case to the bare() loader.
-# REQUIRED: Ensure 'bare <new-model>' maps to a unique Vault secret path/role.
-# ==============================================================================
 # Fill in your Vault details and re-run the installer
 export VAULT_ADDR="$FINAL_VAULT_ADDR"
 export VAULT_ROLE_ID="$AGENT_ROLE_ID"
 export VAULT_SECRET_ID="$AGENT_SECRET_ID"
 EOF
 echo -e "${GREEN}✓ Vault config saved pointing to $FINAL_VAULT_ADDR${NC}"
-
-
 
 # --- 1c. SOVEREIGN SEARCH SETUP ---
 echo -e "\n${YELLOW}Checking Search Engine configuration...${NC}"
@@ -332,42 +306,12 @@ fi
 #####################################################
 #####################################################
 
-# --- 2. ARTIFACT INSTALLATION ---
-ARTIFACT_NAME="bare-summarize"
-DEST_BIN="$BIN_DIR/$ARTIFACT_NAME"
-
-echo -e "${YELLOW}Resolving artifact: $ARTIFACT_NAME...${NC}"
-
-if [ -f "$SOURCE_DIR/$ARTIFACT_NAME" ]; then
-    echo -e "${GREEN}Found artifact in source directory.${NC}"
-    execute_command "cp \"$SOURCE_DIR/$ARTIFACT_NAME\" \"$DEST_BIN\"" "Install artifact from source dir"
-
-elif [ -f "$(pwd)/$ARTIFACT_NAME" ]; then
-    echo -e "${GREEN}Found artifact in current working directory.${NC}"
-    execute_command "cp \"$(pwd)/$ARTIFACT_NAME\" \"$DEST_BIN\"" "Install artifact from cwd"
-
-else
-    echo -e "${YELLOW}Artifact not found locally. Generating emergency stub...${NC}"
-    cat << 'STUB' > "$DEST_BIN"
-#!/bin/bash
-echo "{\"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\", \"status\": \"healthy\", \"telemetry\": \"stubbed\"}"
-STUB
-    echo -e "${YELLOW}Notice: Installed stub version of bare-summarize.${NC}"
-fi
-
-execute_command "chmod +x \"$DEST_BIN\"" "Make bare-summarize executable"
-
-#####################################################
-#####################################################
-#####################################################
-
-# --- 3. ENGINE INSTALLATION ---
+# --- 2. ENGINE INSTALLATION ---
 if [ "$FAST_UPDATE" = false ]; then
     if [ "$ENGINE_CHOICE" == "1" ]; then
         echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
 
         # Ensure npm is available and up to date before attempting build
-        # npm 9.x has a known bug with npm: alias in overrides - requires npm 10+
         if ! command -v npm &>/dev/null; then
             echo -e "${YELLOW}npm not found. Installing Node.js and npm...${NC}"
             execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq nodejs npm" "Install Node.js and npm"
@@ -427,7 +371,7 @@ fi
 #####################################################
 #####################################################
 
-# --- 4 BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
+# --- 3. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
 echo -e "${YELLOW}Deploying bare-necessities toolset to CLI workspace jail...${NC}"
 CLI_SCRIPTS_DIR="$HOME/bare-ai-cli/my-bare-scripts"
 
@@ -439,13 +383,11 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     echo -e "${YELLOW}Syncing toolkit to $CLI_SCRIPTS_DIR...${NC}"
     execute_command "cp -r \"$BARE_NECESSITIES_DIR/\"* \"$CLI_SCRIPTS_DIR/\"" "Copy tools into jail"
 
-
     echo -e "${YELLOW}Setting executable permissions in jail...${NC}"
     execute_command "find \"$CLI_SCRIPTS_DIR\" -type f \\( -name \"*.sh\" -o -name \"*.py\" \\) -exec chmod +x {} +" "Make jail scripts executable"
 
     echo -e "${YELLOW}Creating global symlinks in /usr/local/bin pointing to jail...${NC}"
     
-    # 3. Create Symlinks pointing to the JAILED versions WITH EXTENSIONS
     # Bash tools
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp.sh" "Symlink cpu-temp.sh"
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check.sh" "Symlink pve-check.sh"
@@ -470,7 +412,7 @@ fi
 #####################################################
 #####################################################
 
-# --- 5. AGENT CONFIG ---
+# --- 4. AGENT CONFIG ---
 echo -e "${YELLOW}Checking Agent ID...${NC}"
 if ! grep -q "export AGENT_ID=" "$CONFIG_FILE" 2>/dev/null; then
     AGENT_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "BARE-$(date +%s)-${RANDOM}")
@@ -484,17 +426,12 @@ fi
 #####################################################
 #####################################################
 
-# --- 6. CONSTITUTIONS ---
-# technical-constitution.md — base Linux rules, managed by bare-ai-agent, read-only
-# role.md                   — node personality, user-owned, never overwritten
-
+# --- 5. CONSTITUTIONS ---
 echo -e "${YELLOW}Deploying technical constitution...${NC}"
 TECH_CONST_SRC="$TEMPLATES_DIR/technical-constitution.md"
 TECH_CONST_DEST="$BARE_AI_DIR/technical-constitution.md"
 
 if [ -f "$TECH_CONST_SRC" ]; then
-    # Always overwrite technical constitution — it is managed by the repo
-    # Unlock first in case a previous install set it read-only
     chmod 644 "$TECH_CONST_DEST" 2>/dev/null || true
     cp "$TECH_CONST_SRC" "$TECH_CONST_DEST"
     chmod 444 "$TECH_CONST_DEST"
@@ -512,8 +449,6 @@ if [ ! -f "$ROLE_CONST" ]; then
     if [ -f "$ROLE_STARTER" ]; then
         cp "$ROLE_STARTER" "$ROLE_CONST"
         echo -e "${GREEN}✓ Starter role constitution created at ~/.bare-ai/role.md${NC}"
-        echo -e "${YELLOW}  → Please edit ~/.bare-ai/role.md to define this node's personality and mission.${NC}"
-        
     else
         echo -e "${YELLOW}⚠️  Role starter template not found — creating blank role.md${NC}"
         echo "# BARE-AI ROLE CONSTITUTION
@@ -523,7 +458,6 @@ else
     echo -e "${GREEN}✓ Role constitution already exists — not overwritten${NC}"
 fi
 
-# ALWAYS create/refresh the visible symlink in the clone directory
 ln -sf "$ROLE_CONST" "$REPO_DIR/role.md"
 echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
 
@@ -531,7 +465,7 @@ echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
 #####################################################
 #####################################################
 
-# --- 7. README ---
+# --- 6. README ---
 echo -e "${YELLOW}Writing README.md...${NC}"
 cat << 'README_EOF' > "$BARE_AI_DIR/README.md"
 # BARE-AI Setup and Configuration
@@ -543,22 +477,13 @@ This directory stores the persistent configuration and memory for the BARE-AI ag
 - **role.md** — Agent personality and mission (edit freely, never overwritten)
 - **diary/** — Daily activity logs
 - **logs/** — JSON telemetry per command execution
-- **bin/** — Local artifacts (bare-summarize, etc.)
+- **bin/** — Local binaries and symlinks
 - **config/agent.env** — Agent config (AGENT_ID, ENGINE_TYPE)
 - **config/vault.env** — Vault credentials 
 
 ## Customising Your Agent
 Edit ~/.bare-ai/role.md to define this agent's personality, mission, and domain rules.
 The technical-constitution.md is managed by the repo — do not edit it directly.
-
-## Engine Selection
-Two engines are supported:
-- **Bare-AI-CLI** — Sovereign, local-first, Vault-integrated
-- **Gemini-CLI** — Standard Google Cloud SDK
-
-## Gemini Setup (if using Gemini engine)
-1. Install: `npm install -g @google/gemini-cli`
-2. API Key:  add `export GEMINI_API_KEY="YOUR_KEY"` to `~/.bashrc`
 README_EOF
 echo -e "${GREEN}✓ README written${NC}"
 
@@ -566,8 +491,7 @@ echo -e "${GREEN}✓ README written${NC}"
 #####################################################
 #####################################################
 
-# --- 8. TELEMETRY PING ---
-# FIX: Use full https:// URL and suppress errors so set -e is not tripped on network issues
+# --- 7. TELEMETRY PING ---
 TELEMETRY_URL="https://www.bare-erp.com"
 echo -e "${YELLOW}Pinging telemetry endpoint...${NC}"
 HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$TELEMETRY_URL" || echo "000")
@@ -577,21 +501,14 @@ echo -e "${GREEN}✓ Telemetry ping: HTTP $HTTP_CODE${NC}"
 #####################################################
 #####################################################
 
-# --- 9. BASHRC UPDATES ---
+# --- 8. BASHRC UPDATES ---
 BASHRC_FILE="$HOME/.bashrc"
 echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
 
-#####################################################
-#####################################################
-#####################################################
-
-
-# 9a. PATH entry
 if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
     cat << 'PATH_EOF' >> "$BASHRC_FILE"
 
 # START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
-
 # BARE-AI PATH
 if [ -d "$HOME/.bare-ai/bin" ] ; then
     PATH="$HOME/.bare-ai/bin:$PATH"
@@ -614,7 +531,6 @@ bare() {
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
 
-    # Load engine type from config
     local ENGINE_TYPE="cloud"
     if [ -f "$CONFIG" ]; then
         source "$CONFIG"
@@ -626,7 +542,6 @@ bare() {
                 echo -e "\n\033[1;33m===================================================\033[0m"
         echo -e "\033[1;33m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
         echo -e "\033[1;33m===================================================\033[0m"
-
 
         echo -e "\n\033[1;36m===================================================\033[0m"
         echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
@@ -677,11 +592,11 @@ bare() {
             021) MODEL="qwen2.5-coder:7b" ;;
             022) MODEL="qwen2.5-coder:14b" ;;
             023) MODEL="qwen2.5-coder:32b" ;;
-            031) MODEL="llama3.1:8b" ;;    
+            031) MODEL="llama3.1:8b" ;;   
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
             043) MODEL="gemma4:31b" ;;
-            051) MODEL="mistral-nemo:latest" ;;    
+            051) MODEL="mistral-nemo:latest" ;;   
             061) MODEL="granite4:tiny-h" ;;
             101) MODEL="gemini-2.5-flash-lite" ;;
             102) MODEL="gemini-2.5-flash" ;;
@@ -718,7 +633,6 @@ bare() {
         echo -e "\033[1;33mWarning: No role constitution at $ROLE_CONST — running with technical only.\033[0m"
     fi
 
-    # Unified Vault Routing (Matches Vault schema and CLI hot-swapper perfectly)
     export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
 
     # Dynamic Tool Capability Mapping
@@ -740,7 +654,6 @@ bare() {
     export BARE_AI_ROLE_CONSTITUTION="$ROLE_CONST"
     export BARE_AI_DIARY="$DIARY"
 
-
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
         local combined_const
@@ -759,7 +672,6 @@ bare() {
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
 
         # --- BARE-AI ENGINE PRE-FLIGHT CHECK ---
-        # Only check local Sovereign models, ignore Premium Cloud models (Gemini/GPT)
         if [[ "$MODEL" =~ ^(tir-na-ai|deepseek|gemma|qwen|llama|mistral|granite) ]]; then
             if command -v ollama &>/dev/null; then
                 if ! ollama list | grep -q "${MODEL}"; then
@@ -804,7 +716,6 @@ bare() {
     fi
 }
 
-alias bare-status='echo "🔍 Local Telemetry Audit:"; bare-summarize | jq .'
 alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
 alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
 alias bare-uninstall='~/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
@@ -817,7 +728,7 @@ BARE_FUNC_EOF
 #####################################################
 #####################################################
 
-# --- 9b. BARE-AI ENGINE BOOTSTRAP (OLLAMA) ---
+# --- 9. BARE-AI ENGINE BOOTSTRAP (OLLAMA) ---
 echo -e "${YELLOW}Bootstrapping Local AI Engines...${NC}"
 
 # Check if Ollama is running locally
@@ -875,7 +786,6 @@ echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare l
 echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
 echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge agent/cli.)"
 
-echo -e "i. ${YELLOW}Fleet Info:${NC}    bare-summarize (<< opt - used in fleet management only in conjunction with bare brain.)"
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
 (crontab -l 2>/dev/null | grep -v "bare-thermal-guard"; echo "* * * * * /usr/local/bin/bare-thermal-guard") | crontab -
