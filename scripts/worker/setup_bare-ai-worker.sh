@@ -768,12 +768,13 @@ bare() {
 
         # --- VAULT PRE-FLIGHT CHECK ---
         if [ -n "${VAULT_ADDR:-}" ]; then
-            if ! curl -s --max-time 1 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 && ! curl -s --max-time 1 "$VAULT_ADDR" > /dev/null 2>&1; then
+            # Added -k to bypass self-signed SSL errors on HTTPS IP addresses
+            if ! curl -s -k --max-time 1 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 && ! curl -s -k --max-time 1 "$VAULT_ADDR" > /dev/null 2>&1; then
                 echo -e "\033[0;31m❌ CRITICAL: Cannot reach Vault at $VAULT_ADDR. Engine execution aborted to prevent hang.\033[0m"
                 return 1
             fi
         fi
-   
+    
         # Launch CLI normally (No infinite loops!)
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
