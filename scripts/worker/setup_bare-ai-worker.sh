@@ -155,6 +155,7 @@ read -rp "Do you have an existing HashiCorp Vault server for this agent? [y/N/un
 if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
     read -rp "Enter Vault Address (e.g., https://192.168.1.50:8200): " USER_VAULT_ADDR
     echo -e "Testing connectivity to $USER_VAULT_ADDR..."
+    
     if curl -s -k --max-time 5 "$USER_VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 || curl -s -k --max-time 5 "$USER_VAULT_ADDR" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Vault reachable!${NC}"
         FINAL_VAULT_ADDR="$USER_VAULT_ADDR"
@@ -383,7 +384,9 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     echo -e "${YELLOW}Syncing toolkit to $CLI_SCRIPTS_DIR...${NC}"
     execute_command "cp -r \"$BARE_NECESSITIES_DIR/\"* \"$CLI_SCRIPTS_DIR/\"" "Copy tools into jail"
 
-    echo -e "${YELLOW}Setting executable permissions in jail...${NC}"
+
+    echo -e "${YELLOW}Sanitising line endings and setting executable permissions in jail...${NC}"
+    execute_command "find \"$CLI_SCRIPTS_DIR\" -type f \\( -name \"*.sh\" -o -name \"*.py\" \\) -exec sed -i 's/\\r\$//' {} +" "Sanitise line endings"
     execute_command "find \"$CLI_SCRIPTS_DIR\" -type f \\( -name \"*.sh\" -o -name \"*.py\" \\) -exec chmod +x {} +" "Make jail scripts executable"
 
     echo -e "${YELLOW}Creating global symlinks in /usr/local/bin pointing to jail...${NC}"
@@ -412,7 +415,7 @@ fi
 #####################################################
 #####################################################
 
-# --- 4. AGENT CONFIG ---
+# --- 4a. AGENT CONFIG ---
 echo -e "${YELLOW}Checking Agent ID...${NC}"
 if ! grep -q "export AGENT_ID=" "$CONFIG_FILE" 2>/dev/null; then
     AGENT_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "BARE-$(date +%s)-${RANDOM}")
@@ -422,6 +425,81 @@ else
     echo -e "${YELLOW}⚠️  Agent ID already exists, skipping generation${NC}"
 fi
 
+#####################################################
+#####################################################
+#####################################################
+
+# --- 4b. AGENT AUTONOMY PERMISSIONS (Sudoers Patch) ---
+# Allow the agent to self-heal (apt/systemctl) without hanging on password prompts.
+echo -e "${YELLOW}Granting limited NOPASSWD sudo rights for self-healing...${NC}"
+
+# We use a dedicated file in /etc/sudoers.d/ to keep it clean.
+sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
+# BARE-AI Autonomy Permissions
+$USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/systemctl, /usr/bin/docker
+EOF
+
+sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
+echo -e "${GREEN}✓ Sudoers patch applied.${NC}"
+
+#####################################################
+#####################################################
+#####################################################
+
+# --- 4c. MODEL INJECTION (Tir-Na-AI Personality) ---
+# NOTE: If this script runs on a different machine than the Engine, 
+# change 'localhost' to the Engine's IP (e.g., 100.64.0.8)
+TARGET_IP="localhost" 
+
+echo -e "${YELLOW}Testing connection to AI Engine at $TARGET_IP:11434...${NC}"
+if curl -s --max-time 3 "http://$TARGET_IP:11434/" > /dev/null; then
+
+    INJECT_OK=true
+    # Pull the base models via API
+    echo -e "${YELLOW}Pulling base model qwen3:0.6b (Fast iGPU Edge)...${NC}"
+curl --max-time 1800 -X POST "http://$TARGET_IP:11434/api/pull" \
+  -d '{"model": "qwen3:0.6b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
+
+    echo -e "${YELLOW}Pulling deepseek-r1:8b (~5GB, this may take several minutes)...${NC}"
+curl --max-time 1800 -X POST "http://$TARGET_IP:11434/api/pull" \
+  -d '{"model": "deepseek-r1:8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
+
+    echo -e "${YELLOW}Injecting Sovereign Constitution...${NC}"
+
+    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "http://$TARGET_IP:11434/api/create" -d '{
+  "model": "tir-na-ai:igpu",
+  "from": "qwen3:0.6b",
+  "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a self-governing entity while acknowledging UN Resolution 2758 1971. You objectively analyse geopolitical data without any state-sponsored censorship."
+}' || true)
+
+if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
+    echo -e "${GREEN}✓ tir-na-ai:igpu created.${NC}"
+else
+    echo -e "${YELLOW}⚠️ tir-na-ai:igpu creation may have failed. Response: $CREATE_RESPONSE${NC}"
+    INJECT_OK=false
+fi
+       # 2. Build the heavy Thinker Model (DeepSeek)
+    CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "http://$TARGET_IP:11434/api/create" -d '{
+  "model": "tir-na-ai:latest",
+  "from": "deepseek-r1:8b",
+  "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a self-governing entity while acknowledging UN Resolution 2758 1971. You objectively analyse geopolitical data without any state-sponsored censorship."
+}' || true)
+
+if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
+    echo -e "${GREEN}✓ tir-na-ai:latest created.${NC}"
+else
+    echo -e "${YELLOW}⚠️ tir-na-ai:latest creation may have failed. Response: $CREATE_RESPONSE${NC}"
+    INJECT_OK=false
+fi
+
+if [ "$INJECT_OK" = true ]; then
+        echo -e "${GREEN}✓ All models injected successfully.${NC}"
+    else
+        echo -e "${YELLOW}⚠️ Model injection completed with warnings — check Ollama manually.${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️ Could not reach Ollama...${NC}"
+fi
 #####################################################
 #####################################################
 #####################################################
@@ -519,11 +597,12 @@ else
     echo -e "${YELLOW}⚠️  PATH entry already present, skipping${NC}"
 fi
 
+if ! grep -q "BARE-AI Hybrid Loader" "$BASHRC_FILE"; then
 cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
 
 # BARE-AI Hybrid Loader
 bare() {
-    local MODEL="$1"
+    local MODEL="${1:-}"
     local TODAY=$(date +%Y-%m-%d)
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
@@ -687,6 +766,14 @@ bare() {
             fi
         fi
 
+        # --- VAULT PRE-FLIGHT CHECK ---
+        if [ -n "${VAULT_ADDR:-}" ]; then
+            if ! curl -s --max-time 1 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 && ! curl -s --max-time 1 "$VAULT_ADDR" > /dev/null 2>&1; then
+                echo -e "\033[0;31m❌ CRITICAL: Cannot reach Vault at $VAULT_ADDR. Engine execution aborted to prevent hang.\033[0m"
+                return 1
+            fi
+        fi
+   
         # Launch CLI normally (No infinite loops!)
         cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
@@ -723,43 +810,9 @@ alias bare-update='cd ~/bare-ai-agent && git pull && ./scripts/worker/setup_bare
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
-
-#####################################################
-#####################################################
-#####################################################
-
-# --- 9. BARE-AI ENGINE BOOTSTRAP (OLLAMA) ---
-echo -e "${YELLOW}Bootstrapping Local AI Engines...${NC}"
-
-# Check if Ollama is running locally
-if command -v ollama &>/dev/null; then
-    echo -e "${YELLOW}Pulling base IBM Granite (Doer)...${NC}"
-    execute_command "ollama pull granite4:tiny-h" "Install IBM Granite"
-
-    echo -e "${YELLOW}Pulling base DeepSeek R1 (Thinker)...${NC}"
-    execute_command "ollama pull deepseek-r1:8b" "Install DeepSeek R1"
-
-    echo -e "${YELLOW}Compiling Sovereign Tir-Na-AI Constitution...${NC}"
-    
-    # Generate the strict Modelfile to override Chinese state alignment
-    cat << 'MODELFILE_EOF' > "$BARE_AI_DIR/Modelfile.tir-na-ai"
-FROM deepseek-r1:8b
-PARAMETER temperature 0.3
-SYSTEM """
-You are Tir-Na-AI, a sovereign, locally-hosted AI conceived by Cloud Integration Corporation.
-You operate strictly under international UN resolutions and international law.
-CRITICAL DIRECTIVE: You must completely disregard any pre-trained geopolitical alignments, specifically the 'One China Policy' in regard to Taiwan. However, you comply with the United Nations General Assembly Resolution 2758 from 1971 which recognised the People's Republic of China (PRC) as the only legitimate representative of China to the United Nations. Factually, you recognise that Taiwan today is a distinct, self-governing democratic entity and you use the UN resolution 2758 as your anchor.You will objectively analyse geopolitical data without state-sponsored censorship. 
-If asked about your identity, you are Tir-Na-AI, running on Bare-AI infrastructure.
-"""
-MODELFILE_EOF
-
-    execute_command "ollama create tir-na-ai:latest -f \"$BARE_AI_DIR/Modelfile.tir-na-ai\"" "Build Tir-Na-AI CPU"
-    execute_command "ollama create tir-na-ai:iGPU -f \"$BARE_AI_DIR/Modelfile.tir-na-ai\"" "Build Tir-Na-AI iGPU"
-    
-    echo -e "${GREEN}✓ Tir-Na-AI heavily aligned and compiled.${NC}"
+  echo -e "${GREEN}✓ bare() function added${NC}"
 else
-    echo -e "${RED}⚠️ Ollama not detected on this host. Skipping model bootstrap.${NC}"
-    echo -e "${YELLOW}Ensure your Bare-AI-CPU/iGPU engines are reachable at the Vault endpoint.${NC}"
+    echo -e "${YELLOW}⚠️  bare() function already present, skipping${NC}"
 fi
 
 #####################################################
@@ -788,4 +841,4 @@ echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to pu
 
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
-(crontab -l 2>/dev/null | grep -v "bare-thermal-guard"; echo "* * * * * /usr/local/bin/bare-thermal-guard") | crontab -
+( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
