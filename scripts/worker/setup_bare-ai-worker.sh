@@ -374,7 +374,7 @@ if [ "$FAST_UPDATE" = false ]; then
             execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
         fi
 
-        execute_command "cd \"$CLI_REPO_DIR\" && npm install && npm run build && npm run bundle" "Build Sovereign Engine"
+        execute_command "cd \"$CLI_REPO_DIR\" && npm install --ignore-scripts && NODE_OPTIONS=\"--max-old-space-size=8192\" npm run build && npm run bundle" "Build Sovereign Engine"
         ENGINE_TYPE="sovereign"
 
     else
