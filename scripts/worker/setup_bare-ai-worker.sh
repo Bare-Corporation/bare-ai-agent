@@ -251,7 +251,7 @@ EOF
 
     # Gemma Models 04x
     vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
-    vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:26b" api_key="local" > /dev/null
+    vault kv put secret/gemma4:26b/config base_url="http://127.0.0.1:11434" model_name="gemma4:26b" api_key="local" > /dev/null
     vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
 
     #Mistral Models 05x
