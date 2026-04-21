@@ -266,14 +266,28 @@ EOF
 
     #9b  PREMIUM Defaults
 
-    vault kv put secret/gemini-2.5-flash-lite/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-flash-lite" api_key="local" > /dev/null
-    vault kv put secret/gemini-2.5-flash/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-flash" api_key="local" > /dev/null
-    vault kv put secret/gemini-2.5-pro/config base_url="http://127.0.0.1:11434" model_name="gemini-2.5-pro" api_key="local" > /dev/null
-    vault kv put secret/gemini-3-flash-preview/config base_url="http://127.0.0.1:11434" model_name="gemini-3-flash-preview" api_key="local" > /dev/null
-    vault kv put secret/gemini-3.1-pro-preview/config base_url="http://127.0.0.1:11434" model_name="gemini-3.1-pro-preview" api_key="local" > /dev/null
-    vault kv put secret/gpt-4o/config base_url="http://127.0.0.1:11434" model_name="gpt-4o" api_key="local" > /dev/null
-    vault kv put secret/gpt-4-turbo/config base_url="http://127.0.0.1:11434" model_name="gpt-4-turbo" api_key="local" > /dev/null
-    vault kv put secret/o1-preview/config base_url="http://127.0.0.1:11434" model_name="o1-preview" api_key="local" > /dev/null
+    vault kv put secret/gemini-2.5-flash-lite/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash-lite" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gemini-2.5-flash/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gemini-2.5-pro/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-pro" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gemini-3-flash-preview/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-3-flash-preview" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gemini-3.1-pro-preview/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-3.1-pro-preview" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gpt-4o/config base_url="https://api.openai.com/v1" model_name="gpt-4o" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gpt-4-turbo/config base_url="https://api.openai.com/v1" model_name="gpt-4-turbo" api_key="enterYourKey" > /dev/null
+    vault kv put secret/o1-preview/config base_url="https://api.openai.com/v1" model_name="o1-preview" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
+    vault kv put secret/deepseek-chat/config base_url="https://api.deepseek.com/v1" model_name="deepseek-chat" api_key="enterYourKey" > /dev/null
+    vault kv put secret/deepseek-reasoner/config base_url="https://api.deepseek.com/v1" model_name="deepseek-reasoner" api_key="enterYourKey" > /dev/null
+    vault kv put secret/qwen-plus/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-plus" api_key="enterYourKey" > /dev/null
+    vault kv put secret/qwen-max/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-max" api_key="enterYourKey" > /dev/null
+    vault kv put secret/moonshot-v1-32k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-32k" api_key="enterYourKey" > /dev/null
+    vault kv put secret/moonshot-v1-200k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-200k" api_key="enterYourKey" > /dev/null
+    vault kv put secret/kimi-k5/config base_url="https://api.moonshot.cn/v1" model_name="kimi-k5" api_key="enterYourKey" > /dev/null
+    vault kv put secret/mistral-large-latest/config base_url="https://api.mistral.ai/v1" model_name="mistral-large-latest" api_key="enterYourKey" > /dev/null
+    vault kv put secret/codestral-latest/config base_url="https://api.mistral.ai/v1" model_name="codestral-latest" api_key="enterYourKey" > /dev/null
+    vault kv put secret/grok-4-1-fast-reasoning/config base_url="https://api.x.ai/v1" model_name="grok-4-1-fast-reasoning" api_key="enterYourKey" > /dev/null
+    vault kv put secret/grok-3/config base_url="https://api.x.ai/v1" model_name="grok-3" api_key="enterYourKey" > /dev/null
     
     # 10. Extract IDs for the Agent
     AGENT_ROLE_ID=$(vault read -field=role_id auth/approle/role/bare-ai-role/role-id)
@@ -702,9 +716,36 @@ bare() {
         echo -e "   105) Gemini 3.1 Pro (Pre)   [gemini-3.1-pro-preview]"
 
         echo -e " \033[1;33m[The GPT Nexus]\033[0m"
-        echo -e "   201) GPT-4o (Omni)          [gpt-4o]"
-        echo -e "   202) GPT-4-Turbo            [gpt-4-turbo]"
-        echo -e "   203) o1-preview (Reasoning) [o1-preview]"
+        echo -e "   151) GPT-4o (Omni)          [gpt-4o]"
+        echo -e "   152) GPT-4-Turbo            [gpt-4-turbo]"
+        echo -e "   153) o1-preview (Reasoning) [o1-preview]"
+
+        echo -e " \033[1;33m[The Claude Collection ]\033[0m"
+        echo -e "   201) Claude-sonnet-4-6      [claude-sonnet-4-6]"
+        echo -e "   202) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
+        echo -e "   203) Claude-opus-4-7        [claude-opus-4-7]"
+
+        echo -e " \033[1;33m[The Depths of Deepseek ]\033[0m"
+        echo -e "   301) deepseek-chat          [deepseek-chat]"
+        echo -e "   302) deepseek-reasoner      [deepseek-reasoner]"
+
+        echo -e " \033[1;33m[The Qwen Stuffani store]\033[0m"
+        echo -e "   351) Qwen-plus)             [qwen-plus]"
+        echo -e "   352) Qwen-max               [qwen-max]"
+
+
+        echo -e " \033[1;33m[The Kimi Corral]\033[0m"
+        echo -e "   401) Moonshot-v1-32k        [moonshot-v1-32k]"
+        echo -e "   402) Moonshot-v1-200k       [moonshot-v1-200k]"
+        echo -e "   403) Kimi-k5)               [kimi-k5]"
+
+        echo -e " \033[1;33m[The Mistral Moet]\033[0m"
+        echo -e "   501) Codestral-latest       [codestral-latest]"
+        echo -e "   502) Mistral-large-latest   [mistral-large-latest]"
+
+        echo -e " \033[1;33m[The Grox Fire]\033[0m"
+        echo -e "   665) Grok-4-1 (Fast)        [grok-4-1-fast-reasoning]"
+        echo -e "   666) Grok-3                 [grok-3]"
         echo -e "---------------------------------------------------"
 
                 read -rp "Select a model code [000-999]: " menu_choice
@@ -729,9 +770,27 @@ bare() {
             103) MODEL="gemini-2.5-pro" ;;
             104) MODEL="gemini-3-flash-preview" ;;
             105) MODEL="gemini-3.1-pro-preview" ;;
-            201) MODEL="gpt-4o" ;;
-            202) MODEL="gpt-4-turbo" ;;
-            203) MODEL="o1-preview" ;;
+            151) MODEL="gpt-4o" ;;
+            152) MODEL="gpt-4-turbo" ;;
+            153) MODEL="o1-preview" ;;
+            201) MODEL="claude-sonnet-4-6" ;;
+            202) MODEL="claude-haiku-4-5-20251001" ;;
+            203) MODEL="claude-opus-4-7" ;;
+            301) MODEL="deepseek-chat" ;;
+            302) MODEL="deepseek-reasoner" ;;
+            351) MODEL="qwen-plus" ;;
+            352) MODEL="qwen-max" ;;
+            401) MODEL="moonshot-v1-32k" ;;
+            402) MODEL="moonshot-v1-200k" ;;
+            403) MODEL="kimi-k5" ;;
+            451) MODEL="451Reserved" ;;
+            452) MODEL="452Reserved" ;;
+            453) MODEL="453Reserved" ;;
+            501) MODEL="codestral-latest" ;;
+            502) MODEL="mistral-large-latest" ;;
+            665) MODEL="grok-4-1-fast-reasoning" ;;
+            666) MODEL="grok-3" ;;
+            
             *) echo -e "\033[0;31mInvalid code. Aborting.\033[0m"; return 1 ;;
         esac
         echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
