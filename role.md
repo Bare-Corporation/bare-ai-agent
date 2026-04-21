@@ -1,1 +1,0 @@
-/home/bare-ai/.bare-ai/role.md

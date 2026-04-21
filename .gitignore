@@ -8,3 +8,4 @@ logs/
 id_ed25519
 *.env
 logs/
+role.md
