@@ -675,17 +675,17 @@ bare() {
     # --- INTERACTIVE MODEL MENU ---
     if [ -z "$MODEL" ]; then
         if [ "$ENGINE_TYPE" = "sovereign" ]; then
-                echo -e "\n\033[1;33m===================================================\033[0m"
+        echo -e "\n\033[1;33m=====================================================\033[0m"
         echo -e "\033[1;33m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
-        echo -e "\033[1;33m===================================================\033[0m"
+        echo -e "\033[1;33m=====================================================\033[0m"
 
-        echo -e "\n\033[1;36m===================================================\033[0m"
+        echo -e "\n\033[1;36m=====================================================\033[0m"
         echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
-        echo -e "\033[1;36m===================================================\033[0m"
-        echo -e "\n \033[1;33m[The Edge - iGPU Accelerated]\033[0m"
+        echo -e "\033[1;36m=====================================================\033[0m"
+        echo -e "\033[1;33m[The Edge - iGPU Accelerated]\033[0m"
         echo -e "   000) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
 
-        echo -e " \033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
+        echo -e "\033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
         echo -e "   001) Tir-Na-AI (8B)          [tir-na-ai:latest]"
         echo -e "   011) DeepSeek R1 (8B)        [deepseek-r1:8b]"
         echo -e "   012) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
@@ -693,7 +693,7 @@ bare() {
         echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
         echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
 
-        echo -e "\n \033[1;33m[The Doers - Tool Execution & Code]\033[0m"      
+        echo -e "\033[1;33m[The Doers - Tool Execution & Code]\033[0m"      
         echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
         echo -e "   022) Qwen 2.5 Coder (14B)    [qwen2.5-coder:14b]"
         echo -e "   023) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
@@ -703,11 +703,11 @@ bare() {
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
 
-        echo -e "---------------------------------------------------"
+        echo -e "-----------------------------------------------------"
 
-        echo -e "\n\033[1;35m===================================================\033[0m"
+        echo -e "\n\033[1;35m=====================================================\033[0m"
         echo -e "\033[1;35m⭐🤖 101-999 - BARE-AI PREMIUM Engine Selection\033[0m"
-        echo -e "\033[1;35m===================================================\033[0m"
+        echo -e "\033[1;35m=====================================================\033[0m"
         echo -e " \033[1;33m[The Gemini Constellation]\033[0m"
         echo -e "   101) Gemini 2.5 Flash Lite  [gemini-2.5-flash-lite]"
         echo -e "   102) Gemini 2.5 Flash       [gemini-2.5-flash]"
@@ -720,19 +720,18 @@ bare() {
         echo -e "   152) GPT-4-Turbo            [gpt-4-turbo]"
         echo -e "   153) o1-preview (Reasoning) [o1-preview]"
 
-        echo -e " \033[1;33m[The Claude Collection ]\033[0m"
+        echo -e " \033[1;33m[The Claude Collection]\033[0m"
         echo -e "   201) Claude-sonnet-4-6      [claude-sonnet-4-6]"
         echo -e "   202) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
         echo -e "   203) Claude-opus-4-7        [claude-opus-4-7]"
 
-        echo -e " \033[1;33m[The Depths of Deepseek ]\033[0m"
+        echo -e " \033[1;33m[The Depths of Deepseek]\033[0m"
         echo -e "   301) deepseek-chat          [deepseek-chat]"
         echo -e "   302) deepseek-reasoner      [deepseek-reasoner]"
 
-        echo -e " \033[1;33m[The Qwen Stuffani store]\033[0m"
+        echo -e " \033[1;33m[The Qwen Stuffani Store]\033[0m"
         echo -e "   351) Qwen-plus)             [qwen-plus]"
         echo -e "   352) Qwen-max               [qwen-max]"
-
 
         echo -e " \033[1;33m[The Kimi Corral]\033[0m"
         echo -e "   401) Moonshot-v1-32k        [moonshot-v1-32k]"
@@ -746,7 +745,8 @@ bare() {
         echo -e " \033[1;33m[The Grox Fire]\033[0m"
         echo -e "   665) Grok-4-1 (Fast)        [grok-4-1-fast-reasoning]"
         echo -e "   666) Grok-3                 [grok-3]"
-        echo -e "---------------------------------------------------"
+        echo -e "-----------------------------------------------------"
+        echo -e " \033[1;36m💡 Tip: You can hot-swap engines mid-session by typing '/model ###', where ### is a valid model #\033[0m"
 
                 read -rp "Select a model code [000-999]: " menu_choice
         case "$menu_choice" in
