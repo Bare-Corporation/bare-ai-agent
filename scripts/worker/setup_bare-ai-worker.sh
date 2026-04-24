@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #############################################################
-#    ____ _                  _ _       _         ____       #
+#    ____ _                  _ _       _        ____        #
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
 #  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
@@ -28,23 +28,29 @@
 # ============================================================================== 
 set -euo pipefail
 
-# --- FAST UPDATE CHECK ---
-FAST_UPDATE=false
-if [[ "${1:-}" == "--fast" ]]; then
-    FAST_UPDATE=true
-    echo -e "\033[1;33mFAST MODE: Skipping engine rebuild. Updating config & Menu only...\033[0m"
-fi
-
-# --- DOCKER / Podman WARNING ---
-if [ ! -f "/.dockerenv" ]; then
-    echo -e "\033[1;33mWarning: Running on host system. For enhanced security, Bare-ERP recommends running within Docker or Podman.\033[0m"
-fi
-
 # --- COLORS ---
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
 RED="\033[0;31m"
 NC="\033[0m"
+
+# --- SUDO KEEP-ALIVE ---
+echo -e "${YELLOW}Requesting sudo access upfront to prevent installation hangs...${NC}"
+sudo -v
+# Keep-alive: update existing sudo time stamp if set, until script has finished
+while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+
+# --- FAST UPDATE CHECK ---
+FAST_UPDATE=false
+if [[ "${1:-}" == "--fast" ]]; then
+    FAST_UPDATE=true
+    echo -e "${YELLOW}FAST MODE: Skipping engine rebuild. Updating config & Menu only...${NC}"
+fi
+
+# --- DOCKER / Podman WARNING ---
+if [ ! -f "/.dockerenv" ]; then
+    echo -e "${YELLOW}Warning: Running on host system. For enhanced security, Bare-ERP recommends running within Docker or Podman.${NC}"
+fi
 
 echo -e "${GREEN}Starting BARE-AI setup...${NC}"
 
@@ -172,8 +178,12 @@ if [ "$INSTALL_VAULT" = true ]; then
     echo -e "${YELLOW}Installing and Initializing Local HashiCorp Vault...${NC}"
     
     # 1. Install Vault and jq (needed for JSON parsing)
-    execute_command "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg" "Add HashiCorp GPG key"
-    execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com \$(lsb_release -cs) main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list" "Add HashiCorp Repo"
+    execute_command "wget -qO- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null" "Add HashiCorp GPG key"
+    
+    # Dynamically find the right codename for Mint or standard Debian/Ubuntu
+    OS_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+    execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $OS_CODENAME main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null" "Add HashiCorp Repo"
+    
     execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault jq" "Install Vault & jq"
 
     # 2. Configure Persistent File Storage (Survives Reboot)

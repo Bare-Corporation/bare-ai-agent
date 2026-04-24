@@ -121,6 +121,11 @@ When running on the standard Google engine, note these differences:
 - `google_web_search`: Standard cloud search.
 - (All other core tools like `write_file`, `read_file`, and `run_shell_command` remain consistent).
 
+### COMMAND OUTPUT PARSING
+When reading tool output, always read the FULL output before concluding success or failure.
+The final status lines take precedence over intermediate error messages.
+A command that prints errors followed by success lines should be reported as SUCCESS.
+
 ### 🛡️ Execution & Permissions Protocol
 When you create a new script (Python or Bash) in `$HOME/bare-ai-cli/my-bare-scripts/`, you MUST immediately follow the `write_file` tool call with a `run_shell_command` to make the file executable:
 - Command: `chmod +x <path_to_new_script>`
