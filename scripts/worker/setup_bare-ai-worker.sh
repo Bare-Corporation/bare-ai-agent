@@ -284,7 +284,7 @@ EOF
     vault kv put secret/llama3.1:8b/config base_url="http://127.0.0.1:11434" model_name="llama3.1:8b" api_key="local" > /dev/null
 
     #Open AI
-    vault kv put secret/gpt-oss-20b/config base_url="http://127.0.0.1:11434" model_name="gpt-oss-20b" api_key="local" > /dev/null
+    vault kv put secret/gpt-oss:20b/config base_url="http://127.0.0.1:11434" model_name="gpt-oss:20b" api_key="local" > /dev/null
 
     
 
@@ -414,7 +414,7 @@ if [ "$FAST_UPDATE" = false ]; then
 
         if [ ! -d "$CLI_REPO_DIR" ]; then
             echo -e "${YELLOW}CLI not found. Cloning sovereign engine from GitHub...${NC}"
-            execute_command "git clone https://github.com/Cian-CloudIntCorp/bare-ai-cli.git \"$CLI_REPO_DIR\"" "Clone Bare-AI-CLI"
+            execute_command "git clone https://github.com/Bare-Corporation/bare-ai-cli.git \"$CLI_REPO_DIR\"" "Clone Bare-AI-CLI"
         else
             echo -e "${GREEN}Existing CLI found. Pulling latest...${NC}"
             execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
@@ -732,6 +732,8 @@ bare() {
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
+        echo -e "   081) gpt-oss-20b             [gpt-oss:20b]"
+        
 
         echo -e "-----------------------------------------------------"
 
@@ -798,6 +800,7 @@ bare() {
             051) MODEL="mistral-nemo:latest" ;;   
             061) MODEL="granite4:tiny-h" ;;
             071) MODEL="llama3.1:8b" ;; 
+            081) MODEL="gpt-oss:20b" ;; 
             101) MODEL="gemini-2.5-flash-lite" ;;
             102) MODEL="gemini-2.5-flash" ;;
             103) MODEL="gemini-2.5-pro" ;;
@@ -995,7 +998,7 @@ fi
 
 echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your systems ~/.bashrc with modifications.)"
 echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
-echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< req - or bare energy or bare loco or bare granite or bare gemma4 etc.)"
+echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< required.)"
 echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
 echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge agent/cli.)"
 

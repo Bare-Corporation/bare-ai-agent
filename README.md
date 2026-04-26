@@ -6,11 +6,11 @@ Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework desi
 
 Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
-**Version:** 5.3.0 - Enterprise (Hybrid Architect Edition)  
+**Version:** 5.5.2 - Enterprise (Hybrid Architect Edition)  
 **Author:** Cian Egan  (CEO & Chief Architect at the Cloud Integration Corporation)
 **Created Date:** 2026-02-02
-**Updated Date:** 2026-04-14
-**Repository:** [github.com/Cian-CloudIntCorp/bare-ai-agent](https://github.com/Cian-CloudIntCorp/bare-ai-agent)
+**Updated Date:** 2026-04-26
+**Repository:** [github.com/Bare-Corporation/bare-ai-agent](https://github.com/Bare-Corporation/bare-ai-agent)
 
 ---
 
@@ -160,7 +160,7 @@ Run this on the target worker machine:
 
 ```bash
 # 1 Clone the repository
-git clone https://github.com/Cian-CloudIntCorp/bare-ai-agent.git ~/bare-ai-agent
+git clone https://github.com/Bare-Corporation/bare-ai-agent.git ~/bare-ai-agent
 
 # 2 Launch the Installer
 # Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
@@ -169,11 +169,6 @@ cd ~/bare-ai-agent/scripts/worker
 chmod +x setup_bare-ai-worker.sh
 ./setup_bare-ai-worker.sh
 
-# 3. Reload your shell
-source ~/.bashrc
-
-# 4. Verify
-bare-summarize
 ```
 
 ## 🔧 Daily Usage (Architect Console)
@@ -182,21 +177,17 @@ bare-summarize
 # Start an AI session (auto-detects engine)
 bare
 
-# Force a specific engine
-bare-gemini       # Use Gemini
-bare-sovereign    # Use Bare-AI-CLI
-
-# Check which engine is active
-bare-engine
-
-# Deploy to a new worker
-bare-enroll bare-ai@10.0.0.25
-
-# Check local telemetry
+# Check local telemetry (not available yet)
 bare-status
 
-# Navigate to repo
-bare-cd
+# Uninstall
+bare-uninstall
+
+# Update
+bare-update
+
+# Switchboard ByPass
+bare <LLMName> launch bare with given model (if available) ie, without launching switchboard
 ```
 
 Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with engine tagging (🤖 Bare-AI / ✨ Gemini).
@@ -235,29 +226,24 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 
 ---
 
-## What's New in v5.5.0
+## What's New in v5.5.2
 
 This release introduces the Sovereign Switchboard, seamlessly bridging the gap between zero-cost local execution and premium cloud intelligence while maintaining strict operational isolation.
 
 - ✅ Premium Cloud Multi-Tenant Routing - Expanded the Sovereign Menu with a 3-digit switchboard to support distinct 1:1 Vault secret paths for granular billing and access control across Google, Anthropic, and OpenAI models.
-
 - ✅ Dual-Engine Conditional Rendering - Implemented strict execution wrappers to isolate the comprehensive Sovereign menu from the standard Gemini CLI, completely preventing execution crashes when switching backends.
-
 - ✅ Standardized Tool-State Awareness - Hardcoded precise tool-use flags (true/false) across all 19 model endpoints, ensuring only capable "Doer" or reasoning models attempt function calling.
+- ✅ Provisioned endpoints for GPT-5.5 (OpenAI) and DeepSeek V4 (Flash & Pro).
+- ✅ Added a pidof systemd guard around service commands. This prevents the script from crashing in minimal environments or restricted containers where systemctl isn't available.
 
 ## What's New in v5.4.0
 This release focuses on rapid fleet management and unified identity protocols, solidifying the agent's core operational logic and upgrading the default model hierarchy.
 
 - ✅ Rapid Fleet Deployment - Introduced the --fast flag in the worker setup to bypass NPM rebuilds, enabling lightning-fast (~3s) configuration and menu updates across all active nodes.
-
 - ✅ Unified Identity Injection - The Bash wrapper now dynamically concatenates both technical-constitution.md and role.md into the $BARE_AI_SYSTEM_PROMPT at runtime for flawless persona and rule adherence.
-
 - ✅ Dynamic Persona Resolution - Resolved the "Self-Healing" persona hardcode override by ensuring the Sovereign Engine strictly respects injected dynamic environment variables over static defaults.
-
 - ✅ Next-Gen "Doer" Promotion - Elevated Alibaba Qwen 2.5 Coder (32B) to the primary Doer role, officially replacing IBM Granite 3.3 for advanced local tool execution and coding tasks.
-
 - ✅ iGPU Vulkan Hardening - Corrected Vault syntax and IP formatting specifically targeting the Tir-Na-AI iGPU endpoints to ensure stable Vulkan acceleration.
-
 - ✅ "Liege" UX Enforcement - Standardized node responses across the fleet by embedding the "Liege" protocol directly into the base technical constitution.
 
 ## What's New in v5.3.0
