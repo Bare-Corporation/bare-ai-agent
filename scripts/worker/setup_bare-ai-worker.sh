@@ -14,8 +14,9 @@
 # DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
 # DATE:           2026-04-18
-# VERSION:        5.5.1 (Brain-Coupled Edition)
+# VERSION:        5.5.2 (Brain-Coupled Edition)
 #
+# -  v5.5.2 Added new GPT5.5 and Deepseek v4 cloud end points.added sudors patch for non rooted machines. Plus added additional support for mint/ubuntu based systems.
 # -  v5.5.1 (Brain-Coupled Edition)
 # - refactor(telemetry): Removed bare-summarize. Telemetry is now handled natively by the Sovereign Brain.
 # -  v5.5.0 (Sovereign Switchboard Edition)
@@ -196,9 +197,17 @@ EOF
     sudo mkdir -p /opt/vault/data
     sudo chown -R vault:vault /opt/vault/data /etc/vault.d
 
-    # 3. Start the system service
-    execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
-    sleep 3 # Wait for boot
+    # 3. Start the system service (if systemd is running)
+    if pidof systemd &> /dev/null; then
+        if [ "$EUID" -ne 0 ]; then
+            execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
+        else
+            execute_command "systemctl enable vault && systemctl restart vault" "Start Vault Service"
+        fi
+        sleep 3 # Wait for boot
+    else
+        echo -e "${YELLOW}Warning: systemd is not running (likely inside a container). Vault must be started manually.${NC}"
+    fi
 
     export VAULT_ADDR="http://127.0.0.1:8200"
 
@@ -243,7 +252,7 @@ EOF
     ## xx2 = Medium / Pro (e.g., 12B 14B, )
     ## xx3 = Heavy / Ultra (e.g., 20B)
     
-    # 9a LOCAL Defaults
+    # 9a LOCAL HOSTED Defaults
 
     # Tir-na-ai Models 00x
     vault kv put secret/tir-na-ai:igpu/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai:igpu" api_key="local" > /dev/null
@@ -251,6 +260,7 @@ EOF
     
     # Deepseek Models 01x
     vault kv put secret/deepseek-r1:8b/config base_url="http://127.0.0.1:11434" model_name="deepseek-r1:8b" api_key="local" > /dev/null
+   
     
     # Qwen Models 02x and 03x
     vault kv put secret/qwen2.5-coder:7b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:7b" api_key="local" > /dev/null
@@ -273,8 +283,12 @@ EOF
     #Meta Models 07x
     vault kv put secret/llama3.1:8b/config base_url="http://127.0.0.1:11434" model_name="llama3.1:8b" api_key="local" > /dev/null
 
+    #Open AI
+    vault kv put secret/gpt-oss-20b/config base_url="http://127.0.0.1:11434" model_name="gpt-oss-20b" api_key="local" > /dev/null
 
-    #9b  PREMIUM Defaults
+    
+
+    #9b  PREMIUM CLOUD Defaults
 
     vault kv put secret/gemini-2.5-flash-lite/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash-lite" api_key="enterYourKey" > /dev/null
     vault kv put secret/gemini-2.5-flash/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash" api_key="enterYourKey" > /dev/null
@@ -284,11 +298,14 @@ EOF
     vault kv put secret/gpt-4o/config base_url="https://api.openai.com/v1" model_name="gpt-4o" api_key="enterYourKey" > /dev/null
     vault kv put secret/gpt-4-turbo/config base_url="https://api.openai.com/v1" model_name="gpt-4-turbo" api_key="enterYourKey" > /dev/null
     vault kv put secret/o1-preview/config base_url="https://api.openai.com/v1" model_name="o1-preview" api_key="enterYourKey" > /dev/null
+    vault kv put secret/gpt-5.5/config base_url="https://api.openai.com/v1" model_name="gpt-5.5" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-chat/config base_url="https://api.deepseek.com/v1" model_name="deepseek-chat" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-reasoner/config base_url="https://api.deepseek.com/v1" model_name="deepseek-reasoner" api_key="enterYourKey" > /dev/null
+    vault kv put secret/deepseek-v4-flash/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-flash" api_key="enterYourKey" > /dev/null
+    vault kv put secret/deepseek-v4-pro/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-pro" api_key="enterYourKey" > /dev/null
     vault kv put secret/qwen-plus/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-plus" api_key="enterYourKey" > /dev/null
     vault kv put secret/qwen-max/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-max" api_key="enterYourKey" > /dev/null
     vault kv put secret/moonshot-v1-32k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-32k" api_key="enterYourKey" > /dev/null
@@ -346,8 +363,13 @@ else
         # Check if Docker is installed, if not, install it
         if ! command -v docker &>/dev/null; then
             echo -e "${YELLOW}Docker not found. Installing Docker engine...${NC}"
-            execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh" "Install Docker"
-            sudo usermod -aG docker "$USER" || true
+
+            if [ "$EUID" -ne 0 ]; then
+                execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh" "Install Docker"
+                sudo usermod -aG docker "$USER" || true
+            else
+                execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh" "Install Docker"
+            fi
             rm -f get-docker.sh
         fi
         
@@ -489,20 +511,18 @@ fi
 #####################################################
 #####################################################
 #####################################################
-
-# --- 4b. AGENT AUTONOMY PERMISSIONS (Sudoers Patch) ---
-# Allow the agent to self-heal (apt/systemctl) without hanging on password prompts.
-echo -e "${YELLOW}Granting limited NOPASSWD sudo rights for self-healing...${NC}"
-
-# We use a dedicated file in /etc/sudoers.d/ to keep it clean.
-sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
-# BARE-AI Autonomy Permissions
+# --- 4b. AGENT AUTONOMY PERMISSIONS (Sudoers Patch), but only if not already root ---
+if [ "$EUID" -ne 0 ]; then
+    # Allow the agent to self-heal (apt/systemctl) without hanging on password prompts.
+    echo -e "${YELLOW}Granting limited NOPASSWD sudo rights for self-healing...${NC}"
+    # Uses a dedicated file in /etc/sudoers.d/ to keep it clean.
+    sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
 $USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/systemctl, /usr/bin/docker
 EOF
-
-sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
-echo -e "${GREEN}✓ Sudoers patch applied.${NC}"
-
+    sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
+else
+    echo -e "${GREEN}✓ Running as root. Skipping sudoers patch.${NC}"
+fi
 
 #####################################################
 #####################################################
@@ -729,6 +749,7 @@ bare() {
         echo -e "   151) GPT-4o (Omni)          [gpt-4o]"
         echo -e "   152) GPT-4-Turbo            [gpt-4-turbo]"
         echo -e "   153) o1-preview (Reasoning) [o1-preview]"
+        echo -e "   155) gpt-5.5                [gpt-5.5]"
 
         echo -e " \033[1;33m[The Claude Collection]\033[0m"
         echo -e "   201) Claude-sonnet-4-6      [claude-sonnet-4-6]"
@@ -738,6 +759,8 @@ bare() {
         echo -e " \033[1;33m[The Depths of Deepseek]\033[0m"
         echo -e "   301) deepseek-chat          [deepseek-chat]"
         echo -e "   302) deepseek-reasoner      [deepseek-reasoner]"
+        echo -e "   303) deepseek-v4-flash      [deepseek-v4-flash]"
+        echo -e "   304) deepseek-v4-pro        [deepseek-v4-pro]"
 
         echo -e " \033[1;33m[The Qwen Stuffani Store]\033[0m"
         echo -e "   351) Qwen-plus)             [qwen-plus]"
@@ -783,11 +806,14 @@ bare() {
             151) MODEL="gpt-4o" ;;
             152) MODEL="gpt-4-turbo" ;;
             153) MODEL="o1-preview" ;;
+            155) MODEL="gpt-5.5" ;;
             201) MODEL="claude-sonnet-4-6" ;;
             202) MODEL="claude-haiku-4-5-20251001" ;;
             203) MODEL="claude-opus-4-7" ;;
             301) MODEL="deepseek-chat" ;;
             302) MODEL="deepseek-reasoner" ;;
+            303) MODEL="deepseek-v4-flash" ;;
+            304) MODEL="deepseek-v4-pro" ;;
             351) MODEL="qwen-plus" ;;
             352) MODEL="qwen-max" ;;
             401) MODEL="moonshot-v1-32k" ;;
