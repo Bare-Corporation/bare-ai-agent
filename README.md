@@ -146,9 +146,9 @@ Fill in your details:
 ```bash
 # Note this will be provided as part of a new install most probably will be local host for single machine users.
 export VAULT_ADDR=https://<YOUR_VAULT_IP>:8200
-```
-# Note by default the Role ID and secret will be stored as an env variable that only the instalation user can access, however, for increased security do not store in this env variable, instead, keep somewhere else secure (like Bitwarden) and only load into the machine when using the AI agent. IE Export injection. 
-```bash
+
+# Note by default the Role ID and secret will be stored as an env variable that only the installation user can access, however, for increased security do not store in this env variable, instead, keep somewhere else secure (like Bitwarden) and only load into the machine when using the AI agent. IE Export injection. 
+
 export VAULT_ROLE_ID=<YOUR_APPROLE_ID>
 export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 ```
@@ -183,9 +183,7 @@ The installer deploys global symlinks in bash or python3 for optimised host mana
 
 > **Note:** The repo can be cloned to any directory. All scripts detect their location automatically.
 
-## Sample Instalation Video (hosted on youtube):
-
-https://youtu.be/4EYMQWYJskU
+*Sample installation Video (hosted on youtube): https://youtu.be/4EYMQWYJskU
 
 ### Option 1. Setting Up a Worker Node Only (IE where Ollama is installed on another machine in the same network, ie like a Gaming PC / GPU Server).
 
@@ -253,11 +251,11 @@ Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with en
 
 ## 📁 Hashi Corp Vault Important Notes for Cloud AIs (Gemini, GPT, Claude, Deepseek, Grok etc)
 
-# 1) Vault has bee pre injected with every model in the sovereign swithboard automatically as part of the Instalation script including the api end point for the given cloud models.
+*1) Vault has been pre-injected with every model in the sovereign swithboard automatically as part of the installation script including the api end point for the given cloud models.
 
-# 2) All you need to do is to PATCH the given secrets with your actual API keys. Note each model has its own secret so you can have different api keys for different vendors models ie for different cost center etc or simply reuse the same api key for the same vendor (only).
+*2) All you need to do is to PATCH the given secrets with your actual API keys. Note each model has its own secret so you can have different api keys for different vendors models ie for different cost center etc or simply reuse the same api key for the same vendor (only).
 
-# 3) Patching Examples: 
+*3) Patching Examples: 
 
 ```bash
 

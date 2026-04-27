@@ -866,9 +866,10 @@ bare() {
 
     export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
 
+
     # Dynamic Tool Capability Mapping
     case "$MODEL" in
-        tir-na-ai:*|deepseek-*|gemma4:*|o1-preview) 
+        tir-na-ai:*|deepseek-r1*|deepseek-coder*|deepseek-reasoner|gemma4:*|o1-preview) 
             export BARE_AI_NO_TOOLS="true" 
             ;;
         *) 
