@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #############################################################
-#    ____ _                  _ _       _        ____        #
+#    ____ _                  _ _       _         ____       #
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
 #  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
@@ -15,18 +15,8 @@
 # AUTHOR:         Cian Egan
 # DATE:           2026-04-18
 # VERSION:        5.5.2 (Brain-Coupled Edition)
-#
-# -  v5.5.2 Added new GPT5.5 and Deepseek v4 cloud end points.added sudors patch for non rooted machines. Plus added additional support for mint/ubuntu based systems.
-# -  v5.5.1 (Brain-Coupled Edition)
-# - refactor(telemetry): Removed bare-summarize. Telemetry is now handled natively by the Sovereign Brain.
-# -  v5.5.0 (Sovereign Switchboard Edition)
-# - feat(menu): Expanded Sovereign Menu to support Premium Cloud multi-tenant routing.
-# - fix(routing): Added strict conditional menu rendering to prevent Gemini-CLI crashes.
-# -  v5.4.0 (Sovereign Autonomy Edition)
-# - feat(core): Implemented `--fast` flag in worker setup to bypass NPM builds.
-# - feat(identity): Unified system prompt injection via concatenating constitutions.
-# - fix(vault): Corrected syntax error and IP formatting for Tir-Na-AI iGPU.
-# ============================================================================== 
+# ==============================================================================
+
 set -euo pipefail
 
 # --- COLORS ---
@@ -189,11 +179,16 @@ if [ "$INSTALL_VAULT" = true ]; then
 
 
     # 2. Configure Persistent File Storage & Disable mlock (Survives Reboot)
-    # Note: disable_mlock=true is required for Mint/Ubuntu environments where 
-    # the vault user lacks CAP_IPC_LOCK by default.
     sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
-storage "file" { path = "/opt/vault/data" }
-listener "tcp" { address = "127.0.0.1:8200"; tls_disable = 1 }
+storage "file" {
+  path = "/opt/vault/data"
+}
+
+listener "tcp" {
+  address     = "127.0.0.1:8200"
+  tls_disable = 1
+}
+
 api_addr = "http://127.0.0.1:8200"
 disable_mlock = true
 ui = true
@@ -201,11 +196,11 @@ EOF
     sudo mkdir -p /opt/vault/data
     sudo chown -R vault:vault /opt/vault/data /etc/vault.d
     
-    # Ensure Vault binary has capability to lock memory (just in case mlock is ever re-enabled)
+    # Ensure Vault binary has capability to lock memory
     sudo setcap cap_ipc_lock=+ep $(readlink -f $(which vault)) 2>/dev/null || true
 
     # 3. Start the system service (if systemd is running)
-    if pidof systemd &> /dev/null; then
+    if [ -d /run/systemd/system ]; then
         if [ "$EUID" -ne 0 ]; then
             execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
         else
