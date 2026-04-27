@@ -359,20 +359,25 @@ if [[ "$HAS_SEARCH" =~ ^[Yy1]$ ]]; then
     echo -e "${GREEN}✓ Search URL set to $SEARCH_ADDR${NC}"
 else
     read -rp "Would you like to auto-install a local SearXNG instance now? [y/N]: " INSTALL_SEARCH
+
     if [[ "$INSTALL_SEARCH" =~ ^[Yy1]$ ]]; then
         echo -e "${YELLOW}Deploying local SearXNG via Docker...${NC}"
-        
-        # Check if Docker is installed, if not, install it
+
         if ! command -v docker &>/dev/null; then
             echo -e "${YELLOW}Docker not found. Installing Docker engine...${NC}"
-
-            if [ "$EUID" -ne 0 ]; then
-                execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh" "Install Docker"
-                sudo usermod -aG docker "$USER" || true
+            execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq ca-certificates curl gnupg" "Install Docker prerequisites"
+            execute_command "sudo install -m 0755 -d /etc/apt/keyrings" "Create keyrings dir"
+            OS_ID=$(. /etc/os-release && echo "${ID}")
+            OS_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+            if [[ "$OS_ID" == "debian" ]]; then
+                DOCKER_REPO="https://download.docker.com/linux/debian"
             else
-                execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh" "Install Docker"
+                DOCKER_REPO="https://download.docker.com/linux/ubuntu"
             fi
-            rm -f get-docker.sh
+            execute_command "curl -fsSL ${DOCKER_REPO}/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg && sudo chmod a+r /etc/apt/keyrings/docker.gpg" "Add Docker GPG key"
+            execute_command "echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] ${DOCKER_REPO} \$OS_CODENAME stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null" "Add Docker repo"
+            execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io" "Install Docker CE"
+            sudo usermod -aG docker "$USER" || true
         fi
         
         # Clean up any old container and spin up a fresh SearXNG
