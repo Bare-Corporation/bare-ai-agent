@@ -187,15 +187,22 @@ if [ "$INSTALL_VAULT" = true ]; then
     
     execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault jq" "Install Vault & jq"
 
-    # 2. Configure Persistent File Storage (Survives Reboot)
+
+    # 2. Configure Persistent File Storage & Disable mlock (Survives Reboot)
+    # Note: disable_mlock=true is required for Mint/Ubuntu environments where 
+    # the vault user lacks CAP_IPC_LOCK by default.
     sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
 storage "file" { path = "/opt/vault/data" }
 listener "tcp" { address = "127.0.0.1:8200"; tls_disable = 1 }
 api_addr = "http://127.0.0.1:8200"
+disable_mlock = true
 ui = true
 EOF
     sudo mkdir -p /opt/vault/data
     sudo chown -R vault:vault /opt/vault/data /etc/vault.d
+    
+    # Ensure Vault binary has capability to lock memory (just in case mlock is ever re-enabled)
+    sudo setcap cap_ipc_lock=+ep $(readlink -f $(which vault)) 2>/dev/null || true
 
     # 3. Start the system service (if systemd is running)
     if pidof systemd &> /dev/null; then
