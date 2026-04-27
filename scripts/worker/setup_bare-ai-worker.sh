@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #############################################################
-#    ____ _                  _ _       _        ____        #
+#    ____ _                  _ _       _         ____       #
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
 #  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
@@ -15,18 +15,8 @@
 # AUTHOR:         Cian Egan
 # DATE:           2026-04-18
 # VERSION:        5.5.2 (Brain-Coupled Edition)
-#
-# -  v5.5.2 Added new GPT5.5 and Deepseek v4 cloud end points.added sudors patch for non rooted machines. Plus added additional support for mint/ubuntu based systems.
-# -  v5.5.1 (Brain-Coupled Edition)
-# - refactor(telemetry): Removed bare-summarize. Telemetry is now handled natively by the Sovereign Brain.
-# -  v5.5.0 (Sovereign Switchboard Edition)
-# - feat(menu): Expanded Sovereign Menu to support Premium Cloud multi-tenant routing.
-# - fix(routing): Added strict conditional menu rendering to prevent Gemini-CLI crashes.
-# -  v5.4.0 (Sovereign Autonomy Edition)
-# - feat(core): Implemented `--fast` flag in worker setup to bypass NPM builds.
-# - feat(identity): Unified system prompt injection via concatenating constitutions.
-# - fix(vault): Corrected syntax error and IP formatting for Tir-Na-AI iGPU.
-# ============================================================================== 
+# ==============================================================================
+
 set -euo pipefail
 
 # --- COLORS ---
@@ -189,11 +179,16 @@ if [ "$INSTALL_VAULT" = true ]; then
 
 
     # 2. Configure Persistent File Storage & Disable mlock (Survives Reboot)
-    # Note: disable_mlock=true is required for Mint/Ubuntu environments where 
-    # the vault user lacks CAP_IPC_LOCK by default.
     sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
-storage "file" { path = "/opt/vault/data" }
-listener "tcp" { address = "127.0.0.1:8200"; tls_disable = 1 }
+storage "file" {
+  path = "/opt/vault/data"
+}
+
+listener "tcp" {
+  address     = "127.0.0.1:8200"
+  tls_disable = 1
+}
+
 api_addr = "http://127.0.0.1:8200"
 disable_mlock = true
 ui = true
@@ -201,11 +196,11 @@ EOF
     sudo mkdir -p /opt/vault/data
     sudo chown -R vault:vault /opt/vault/data /etc/vault.d
     
-    # Ensure Vault binary has capability to lock memory (just in case mlock is ever re-enabled)
+    # Ensure Vault binary has capability to lock memory
     sudo setcap cap_ipc_lock=+ep $(readlink -f $(which vault)) 2>/dev/null || true
 
     # 3. Start the system service (if systemd is running)
-    if pidof systemd &> /dev/null; then
+    if [ -d /run/systemd/system ]; then
         if [ "$EUID" -ne 0 ]; then
             execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
         else
@@ -364,20 +359,25 @@ if [[ "$HAS_SEARCH" =~ ^[Yy1]$ ]]; then
     echo -e "${GREEN}✓ Search URL set to $SEARCH_ADDR${NC}"
 else
     read -rp "Would you like to auto-install a local SearXNG instance now? [y/N]: " INSTALL_SEARCH
+
     if [[ "$INSTALL_SEARCH" =~ ^[Yy1]$ ]]; then
         echo -e "${YELLOW}Deploying local SearXNG via Docker...${NC}"
-        
-        # Check if Docker is installed, if not, install it
+
         if ! command -v docker &>/dev/null; then
             echo -e "${YELLOW}Docker not found. Installing Docker engine...${NC}"
-
-            if [ "$EUID" -ne 0 ]; then
-                execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh" "Install Docker"
-                sudo usermod -aG docker "$USER" || true
+            execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq ca-certificates curl gnupg" "Install Docker prerequisites"
+            execute_command "sudo install -m 0755 -d /etc/apt/keyrings" "Create keyrings dir"
+            OS_ID=$(. /etc/os-release && echo "${ID}")
+            OS_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+            if [[ "$OS_ID" == "debian" ]]; then
+                DOCKER_REPO="https://download.docker.com/linux/debian"
             else
-                execute_command "curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh" "Install Docker"
+                DOCKER_REPO="https://download.docker.com/linux/ubuntu"
             fi
-            rm -f get-docker.sh
+            execute_command "curl -fsSL ${DOCKER_REPO}/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg && sudo chmod a+r /etc/apt/keyrings/docker.gpg" "Add Docker GPG key"
+            execute_command "echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] ${DOCKER_REPO} \$OS_CODENAME stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null" "Add Docker repo"
+            execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io" "Install Docker CE"
+            sudo usermod -aG docker "$USER" || true
         fi
         
         # Clean up any old container and spin up a fresh SearXNG
