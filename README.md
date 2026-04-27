@@ -17,7 +17,7 @@ Note: a very early alpha of bare-ai-agent for windows is pre bundled but only wo
 ## 🛠 Features
 - **Identity:** Autonomous Linux Agent with Level 4 Autonomy.
 - **Security:** Zero-Knowledge local secret injection via Vault AppRole.
-- **Intelligence:** Hybrid routing between Google Gemma 4 (31B) and local optimized models (DeepSeek, Granite).
+- **Intelligence:** Hybrid routing between Google Gemma 4 (31B) and local optimised models (DeepSeek, Granite).
 - **Grounding:** Sovereign search via SearXNG (Chinese & Global results).
 - **Telemetry:** Real-time hardware audits via the `bare-necessities` toolkit.
 - **Self-Healing Data Pipelines:** Autonomous error detection and log sniping.
@@ -28,18 +28,17 @@ Note: a very early alpha of bare-ai-agent for windows is pre bundled but only wo
 ## 🏛️ System Architecture
 This project is designed to mimic the cloud AI terminal Command line interface (CLI) experience (like Google Gemini or Claude Code etc) but entirely on your own hardware.
 
-The AI model(s): 1 centralized High-Performance VM or PC running an LLM (e.g., Ollama/vLLM with Granite 4).
+The AI model(s): 1 centralised High-Performance VM or PC running an LLM (e.g., Ollama/vLLM with Granite 4).
 
 The Worker Hands: Unlimited lightweight VMs running bare-ai-agent and bare-ai-cli.
 
-The Memory: A centralized HashiCorp Vault server to manage endpoints and keys securely across the fleet.
+The Memory: A centralised HashiCorp Vault server to manage endpoints and keys securely across the fleet.
 
 The fleet follows a strict role-based hierarchy to ensure safety and scalability:
 
 ### 1. The Workers (Fleet Nodes)
 **Hosts:** Any enrolled Linux node  
 **Role:** Telemetry reporting and payload execution.  
-**Core Tool:** `bare-summarize` — outputs structured JSON telemetry for the Brain (sepereate premium project).
 
 ## 1a. ⚖️ Bare-ai-agent Workers Technical Constitution
 The worker agent(s) operates under a read-only Technical Constitution found in ~/.bare-ai/technical-constitution.md. This defines tool-use boundaries, resource limits, and sovereign operational style.
@@ -71,7 +70,6 @@ You can deploy the bare-ai-agent on different Command Line Interfaces (CLIs) nam
 | Type | Rule | Example |
 |------|------|---------|
 | Installers | Must have `.sh` extension | `setup_bare-ai-worker.sh` |
-| Tools/Artifacts | No extension | `bare-summarize`, `bare-enroll` |
 
 Tools have no extension so the underlying implementation (Bash, Python, Go) can change without breaking system calls.
 
@@ -92,6 +90,7 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 
 | Component | Requirement | Notes |
 |-----------|-------------|-------|
+| Ollama | Ollama Latest | `or llm.cpp but different port numbers will be needed in vault secrets if used. Start with Ollama.` |
 | Bare-AI-CLI | Node.js, npm | `npm install -g bare-ai-cli` |
 | Gemini-CLI | Node.js, npm | `sudo npm install -g @google/gemini-cli` |
 | SSH | OpenSSH client | Required for `bare-enroll` |
@@ -99,30 +98,60 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 
 ---
 
-## 🔐 Vault Configuration (Mandatory)
+## 🔐 Managing API Keys with HashiCorp Vault (Mandatory)
 
-The agent remains "Sovereign" by fetching its own connection details from your centralized Vault server. 
+Bare-AI uses a locally hosted HashiCorp Vault to secure your API keys and model configurations. You do **not** need to store plain-text API keys in your `.bashrc` or environment variables. The setup script automatically configures the Vault and creates a "Sovereign Switchboard" of pre-mapped models with dummy API keys. 
 
-1. Configure the Agent's Vault Access
-After installation, edit your local credentials to allow the agent to talk to your Vault server:
-`nano ~/.bare-ai/config/vault.env`
+To activate a Premium Cloud model, you simply need to "patch" the existing secret with your real API key.
 
-The installer generates this file with `export` keywords. Simply fill in your details:
+### 1. Patching Cloud API Keys
+Use the `vault kv patch` command. This safely updates *only* the `api_key` field while leaving the pre-configured routing URLs intact. Replace the placeholder with your actual key:
+
 ```bash
+# Gemini 2.5 flash-lite Example Patch: 
+vault kv patch secret/gemini-2.5-flash-lite/config api_key="YOUR_REAL_KEY_STARTS_WITH:AI"
+
+# GPT-5.5 Example Patch: 
+vault kv patch secret/gpt-5.5/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+
+# Claude-Sonnet-4.6 Example Patch: 
+vault kv patch secret/claude-sonnet-4-6/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+
+# DeepSeek-V4-Pro Example Patch: 
+vault kv patch secret/deepseek-v4-pro/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+```
+Tip: To find the exact path for other models, look at the model slug in brackets [modelName] within the Sovereign Switchboard menu.
+
+2. Vault Recovery & Maintenance (CRITICAL)
+During installation, your Vault Root Token and Unseal Key were generated and saved locally to:
+```bash
+~/.bare-ai/config/vault-recovery-keys.txt
+```
+The Reboot Reality: HashiCorp Vault automatically seals itself every time the system reboots. If your machine restarts, the Bare-AI engine will fail to load. You must manually unseal the Vault by running:
+
+```bash
+vault operator unseal
+```
+# (Paste the Unseal Key from your recovery text file when prompted)
+Security Recommendation: For true Enterprise security, copy the contents of vault-recovery-keys.txt into a secure password manager (like Bitwarden) and then delete the file from the machine entirely. Leaving the master keys in plain text on the hard drive is a security risk.
+
+3. Agent Connection Configuration
+If you are connecting an agent to a remote Vault server, edit your credentials:
+```bash
+nano ~/.bare-ai/config/vault.env
+```
+
+Fill in your details:
+
+```bash
+# Note this will be provided as part of a new install most probably will be local host for single machine users.
 export VAULT_ADDR=https://<YOUR_VAULT_IP>:8200
+```
+# Note by default the Role ID and secret will be stored as an env variable that only the instalation user can access, however, for increased security do not store in this env variable, instead, keep somewhere else secure (like Bitwarden) and only load into the machine when using the AI agent. IE Export injection. 
+```bash
 export VAULT_ROLE_ID=<YOUR_APPROLE_ID>
 export VAULT_SECRET_ID=<YOUR_SECRET_ID>
 ```
-
-2. Configure the Secret Path in Vault.
-The agent fetches its intelligence endpoint from a secret path (
-default: secret/data/granite/config).
-Required Keys in your Vault Secret:
-
-| KeyValue | Example | Description |
-|--------|------|----------|
-| BARE_AI_ENDPOINT| http://192.168.x.x:11434/v1| The given LAN IP of Inference Server |
-| BARE_AI_MODEL | granite4:3b | The model slug |
 
 ## 🌐 Networking & ConnectivityLAN vs. TailscaleLAN (Recommended): 
 Use the standard LAN IP (192.168.x.x) for the lowest latency.Tailscale (Optional): To call your "agents" from outside your home network, use Tailscale IPs. Note: You must install and authenticate Tailscale on the VM manually.
@@ -150,19 +179,47 @@ The installer deploys global symlinks in bash or python3 for optimised host mana
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (with two options depeneding on your requirements):
 
 > **Note:** The repo can be cloned to any directory. All scripts detect their location automatically.
 
-### 1. Setting Up a Worker Node
+## Sample Instalation Video (hosted on youtube):
+
+https://youtu.be/4EYMQWYJskU
+
+### Option 1. Setting Up a Worker Node Only (IE where Ollama is installed on another machine in the same network, ie like a Gaming PC / GPU Server).
 
 Run this on the target worker machine:
 
 ```bash
-# 1 Clone the repository
+
+# 1 Then Clone the bare-ai-agent repository
 git clone https://github.com/Bare-Corporation/bare-ai-agent.git ~/bare-ai-agent
 
-# 2 Launch the Installer
+# 2 Launch the bare-ai-agent worker Installer
+# Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
+
+cd ~/bare-ai-agent/scripts/worker
+chmod +x setup_bare-ai-worker.sh
+./setup_bare-ai-worker.sh
+
+```
+
+## OR ##
+
+### Option 2. Setting Up a Worker Node and AI Engine Node (ie where you will run the bare-ai agent, bare-ai-cli and Ollma or llama.cpp in one machine.)
+
+Run this on the target worker / AI Engine machine:
+
+```bash
+
+# 0 You must install an AI Engine like Ollama (Default Engine)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 1 Then Clone the bare-ai-agent repository
+git clone https://github.com/Bare-Corporation/bare-ai-agent.git ~/bare-ai-agent
+
+# 2 Launch the bare-ai-agent worker Installer
 # Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
 
 cd ~/bare-ai-agent/scripts/worker
@@ -188,9 +245,37 @@ bare-update
 
 # Switchboard ByPass
 bare <LLMName> launch bare with given model (if available) ie, without launching switchboard
-```
+
 
 Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with engine tagging (🤖 Bare-AI / ✨ Gemini).
+
+```
+
+## 📁 Hashi Corp Vault Important Notes for Cloud AIs (Gemini, GPT, Claude, Deepseek, Grok etc)
+
+# 1) Vault has bee pre injected with every model in the sovereign swithboard automatically as part of the Instalation script including the api end point for the given cloud models.
+
+# 2) All you need to do is to PATCH the given secrets with your actual API keys. Note each model has its own secret so you can have different api keys for different vendors models ie for different cost center etc or simply reuse the same api key for the same vendor (only).
+
+# 3) Patching Examples: 
+
+```bash
+
+# 3.1) Gemini 2.5 flash-lite Example Patch: 
+vault kv patch secret/gemini-2.5-flash-lite/config api_key="YOUR_REAL_KEY_STARTS_WITH:AI"
+
+# 3.2) gpt-5.5 Example Patch: 
+vault kv patch secret/gpt-5.5/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+
+# 3.3) claude-sonnet-4-6 Example Patch: 
+vault kv patch secret/claude-sonnet-4-6/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+
+# 3.4) deepseek-v4-pro Example Patch: 
+vault kv patch secret/deepseek-v4-pro/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+
+## Reminder replace for all the AI models from these vendors, tip: see the exact naming convention in the sovereign switchboard between the square brackets: [modelName]
+
+```
 
 ## 📁 Repository Structure
 
@@ -232,9 +317,10 @@ This release introduces the Sovereign Switchboard, seamlessly bridging the gap b
 
 - ✅ Premium Cloud Multi-Tenant Routing - Expanded the Sovereign Menu with a 3-digit switchboard to support distinct 1:1 Vault secret paths for granular billing and access control across Google, Anthropic, and OpenAI models.
 - ✅ Dual-Engine Conditional Rendering - Implemented strict execution wrappers to isolate the comprehensive Sovereign menu from the standard Gemini CLI, completely preventing execution crashes when switching backends.
-- ✅ Standardized Tool-State Awareness - Hardcoded precise tool-use flags (true/false) across all 19 model endpoints, ensuring only capable "Doer" or reasoning models attempt function calling.
+- ✅ Standardised Tool-State Awareness - Hardcoded precise tool-use flags (true/false) across all 19 model endpoints, ensuring only capable "Doer" or reasoning models attempt function calling.
 - ✅ Provisioned endpoints for GPT-5.5 (OpenAI) and DeepSeek V4 (Flash & Pro).
 - ✅ Added a pidof systemd guard around service commands. This prevents the script from crashing in minimal environments or restricted containers where systemctl isn't available.
+- ✅ Added x3 new models for Deepseek R4 Premium, Flash and Open AIs Chat GPT5.5 Cloud AIs.
 
 ## What's New in v5.4.0
 This release focuses on rapid fleet management and unified identity protocols, solidifying the agent's core operational logic and upgrading the default model hierarchy.
@@ -244,14 +330,14 @@ This release focuses on rapid fleet management and unified identity protocols, s
 - ✅ Dynamic Persona Resolution - Resolved the "Self-Healing" persona hardcode override by ensuring the Sovereign Engine strictly respects injected dynamic environment variables over static defaults.
 - ✅ Next-Gen "Doer" Promotion - Elevated Alibaba Qwen 2.5 Coder (32B) to the primary Doer role, officially replacing IBM Granite 3.3 for advanced local tool execution and coding tasks.
 - ✅ iGPU Vulkan Hardening - Corrected Vault syntax and IP formatting specifically targeting the Tir-Na-AI iGPU endpoints to ensure stable Vulkan acceleration.
-- ✅ "Liege" UX Enforcement - Standardized node responses across the fleet by embedding the "Liege" protocol directly into the base technical constitution.
+- ✅ "Liege" UX Enforcement - Standardised node responses across the fleet by embedding the "Liege" protocol directly into the base technical constitution.
 
 ## What's New in v5.3.0
 
 This release graduates the worker node to **Level 4 Autonomy**, enabling fully unchained, self-healing, and context-aware script execution directly on bare metal.
 
 - ✅ Sovereign Autonomy Overrides (YOLA) - The agent now boots with `BARE_AI_YOLA_MODE` and `BARE_AI_DISABLE_WORKSPACE_TRUST` natively injected into the session environment. Zero execution prompts, zero jail warnings.
-- ✅ Token-Optimized Global Symlinks - Restored `.sh` and `.py` extensions to the `bare-necessities` toolkit global binaries. This gives local LLMs critical environmental context *without* wasting tokens reading file headers.
+- ✅ Token-Optimised Global Symlinks - Restored `.sh` and `.py` extensions to the `bare-necessities` toolkit global binaries. This gives local LLMs critical environmental context *without* wasting tokens reading file headers.
 - ✅ Flawless Multi-Tool Chaining - Hardened the directory mapping and permissions logic so the AI can successfully chain `write_file` -> `chmod +x` -> `execute` autonomously in a single generation.
 - ✅ Strict Bash Compliance - Re-architected variable resolution and Git deployment ordering to survive strict `set -euo pipefail` OS conditions without crashing.
 - ✅ Refined Terminal UX - Upgraded post-installation instructions to clearly differentiate between required commands and optional fleet-management tools.
@@ -272,6 +358,23 @@ This release graduates the worker node to **Level 4 Autonomy**, enabling fully u
 - ✅ Dynamic path detection — scripts work regardless of clone directory name
 
 ---
+
+## 🚑 "3rd Party Troubleshooting"
+1. Ollama 500 Error / Out of Memory (Model won't load)
+
+The Cause: Linux hoards RAM in the buff/cache column, causing the pre-flight check to fail when loading massive models (like 32B+).
+
+The Fix: Force Linux to flush the cache by running:
+sudo sync; sudo bash -c "echo 3 > /proc/sys/vm/drop_caches"
+
+2. Vault Service Fails to Start (Linux Mint / Ubuntu)
+
+The Cause: Systemd initialization issues or broken partial installations.
+
+The Fix: Wipe the corrupted Vault state and retry:
+sudo systemctl stop vault
+sudo rm -rf /opt/vault/data/*
+Then run the setup script again.
 
 ## 📝 License
 
