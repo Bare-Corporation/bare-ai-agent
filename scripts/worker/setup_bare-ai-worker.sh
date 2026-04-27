@@ -270,6 +270,7 @@ EOF
     vault kv put secret/qwen2.5-coder:32b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:32b" api_key="local" > /dev/null
     vault kv put secret/qwen3.5:0.8b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:0.8b" api_key="local" > /dev/null
     vault kv put secret/qwen3.5:4b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:4b" api_key="local" > /dev/null
+    vault kv put secret/qwen3.6:27b/config base_url="http://127.0.0.1:11434" model_name="qwen3.6:27b" api_key="local" > /dev/null
 
     # Gemma Models 04x
     vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
@@ -735,7 +736,8 @@ bare() {
         echo -e "   022) Qwen 2.5 Coder (14B)    [qwen2.5-coder:14b]"
         echo -e "   023) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
         echo -e "   030) Qwen 3.5 (0.8B)         [qwen3.5:0.8b]"
-        echo -e "   031) Qwen 3.5 (4B)           [qwen3:5.4b]"     
+        echo -e "   031) Qwen 3.5 (4B)           [qwen3:5:4b]"
+        echo -e "   032) Qwen 3.6 (27B)          [qwen3.6:27b]" 
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
@@ -784,7 +786,7 @@ bare() {
         echo -e "   501) Codestral-latest       [codestral-latest]"
         echo -e "   502) Mistral-large-latest   [mistral-large-latest]"
 
-        echo -e " \033[1;33m[The Grox Fire]\033[0m"
+        echo -e " \033[1;33m[The Grok Fire]\033[0m"
         echo -e "   665) Grok-4-1 (Fast)        [grok-4-1-fast-reasoning]"
         echo -e "   666) Grok-3                 [grok-3]"
         echo -e "-----------------------------------------------------"
@@ -801,6 +803,7 @@ bare() {
             023) MODEL="qwen2.5-coder:32b" ;;
             030) MODEL="qwen3.5:0.8b" ;;
             031) MODEL="qwen3.5:4b" ;;
+            032) MODEL="qwen3.6:27b" ;; 
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
             043) MODEL="gemma4:31b" ;;
