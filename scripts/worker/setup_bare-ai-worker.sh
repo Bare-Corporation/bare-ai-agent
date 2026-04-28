@@ -302,9 +302,9 @@ EOF
     vault kv put secret/gpt-4-turbo/config base_url="https://api.openai.com/v1" model_name="gpt-4-turbo" api_key="enterYourKey" > /dev/null
     vault kv put secret/o1-preview/config base_url="https://api.openai.com/v1" model_name="o1-preview" api_key="enterYourKey" > /dev/null
     vault kv put secret/gpt-5.5/config base_url="https://api.openai.com/v1" model_name="gpt-5.5" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-chat/config base_url="https://api.deepseek.com/v1" model_name="deepseek-chat" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-reasoner/config base_url="https://api.deepseek.com/v1" model_name="deepseek-reasoner" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-v4-flash/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-flash" api_key="enterYourKey" > /dev/null
@@ -742,7 +742,6 @@ bare() {
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
         echo -e "   081) gpt-oss-20b             [gpt-oss:20b]"
-        
 
         echo -e "-----------------------------------------------------"
 
@@ -763,8 +762,8 @@ bare() {
         echo -e "   155) gpt-5.5                [gpt-5.5]"
 
         echo -e " \033[1;33m[The Claude Collection]\033[0m"
-        echo -e "   201) Claude-sonnet-4-6      [claude-sonnet-4-6]"
-        echo -e "   202) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
+        echo -e "   201) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
+        echo -e "   202) Claude-sonnet-4-6      [claude-sonnet-4-6]"
         echo -e "   203) Claude-opus-4-7        [claude-opus-4-7]"
 
         echo -e " \033[1;33m[The Depths of Deepseek]\033[0m"
@@ -820,8 +819,8 @@ bare() {
             152) MODEL="gpt-4-turbo" ;;
             153) MODEL="o1-preview" ;;
             155) MODEL="gpt-5.5" ;;
-            201) MODEL="claude-sonnet-4-6" ;;
-            202) MODEL="claude-haiku-4-5-20251001" ;;
+            201) MODEL="claude-haiku-4-5-20251001" ;;
+            202) MODEL="claude-sonnet-4-6" ;;
             203) MODEL="claude-opus-4-7" ;;
             301) MODEL="deepseek-chat" ;;
             302) MODEL="deepseek-reasoner" ;;
