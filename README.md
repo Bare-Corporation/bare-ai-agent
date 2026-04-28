@@ -10,7 +10,8 @@ Note: a very early alpha of bare-ai-agent for windows is pre bundled but only wo
 **Author:** Cian Egan  (CEO & Chief Architect at the Cloud Integration Corporation)
 **Created Date:** 2026-02-02
 **Updated Date:** 2026-04-26
-**Repository:** [github.com/Bare-Corporation/bare-ai-agent](https://github.com/Bare-Corporation/bare-ai-agent)
+**Installation Repository (Start Here):** [github.com/Bare-Corporation/bare-ai-agent](https://github.com/Bare-Corporation/bare-ai-agent)
+**Main CLI Repository:** [github.com/Bare-Corporation/bare-ai-cli](https://github.com/Bare-Corporation/bare-ai-cli)
 
 ---
 
