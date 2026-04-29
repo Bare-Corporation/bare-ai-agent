@@ -78,7 +78,6 @@ Tools have no extension so the underlying implementation (Bash, Python, Go) can 
 
 ## 🔒 Security Notes
 
-- The Architect Console runs on your local dev machine — **never on production servers**
 - Workers operate with minimal permissions — telemetry reporting and reflex execution only
 - All telemetry is logged locally in JSON format
 - No data leaves your network unless you choose the Google Gemini engine (option 2).
@@ -227,24 +226,28 @@ chmod +x setup_bare-ai-worker.sh
 
 ```
 
-## 🔧 Daily Usage (Architect Console)
+## 🔧 Daily Usage (bare commands)
 
 ```bash
 # Start an AI session (auto-detects engine)
+
 bare
 
-# Check local telemetry (not available yet)
-bare-status
-
-# Uninstall
-bare-uninstall
+1) Admin Comamands:
 
 # Update
 bare-update
 
+# Uninstall
+bare-uninstall
+
+--
+2) Model Comamands:
+
 # Switchboard ByPass
 bare <LLMName> launch bare with given model (if available) ie, without launching switchboard
 
+3) Bare AI Diary
 
 Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with engine tagging (🤖 Bare-AI / ✨ Gemini).
 
@@ -378,6 +381,8 @@ Then run the setup script again.
 ## 📝 License
 
 Apache-2.0
+
+In short, these projects are free to copy and modify but you must credit google (orgianl gemini gli developers) and cloud integration corporation (bare-ai) in your work.
 
 ## by the Cloud Integration Corporation
 
