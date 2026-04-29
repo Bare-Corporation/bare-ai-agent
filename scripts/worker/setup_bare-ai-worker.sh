@@ -409,8 +409,20 @@ if [ "$FAST_UPDATE" = false ]; then
             execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq nodejs npm" "Install Node.js and npm"
         fi
 
+        # Node.js version check — bare-ai-cli requires Node 24+
+        NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || echo "0")
+        if [ "${NODE_MAJOR:-0}" -lt 24 ]; then
+            echo -e "${RED}❌ Node.js v24+ is required. Current version: $(node -v 2>/dev/null || echo 'not found')${NC}"
+            echo -e "${YELLOW}Installing Node.js 24 via NodeSource...${NC}"
+            execute_command "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -" "Add NodeSource v24 repo"
+            execute_command "sudo apt-get install -y nodejs" "Install Node.js 24"
+            hash -r 2>/dev/null || true
+            echo -e "${GREEN}✓ Node.js $(node -v) installed${NC}"
+        fi
+
         NPM_MAJOR=$(npm --version 2>/dev/null | cut -d. -f1)
         if [ "${NPM_MAJOR:-0}" -lt 10 ]; then
+        
             echo -e "${YELLOW}npm version too old ($(npm --version)). Upgrading via n...${NC}"
             execute_command "sudo npm install -g n" "Install n (node version manager)"
             execute_command "sudo n stable" "Upgrade Node.js to stable"
