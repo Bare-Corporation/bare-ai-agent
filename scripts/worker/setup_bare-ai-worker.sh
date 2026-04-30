@@ -410,9 +410,9 @@ if [ "$FAST_UPDATE" = false ]; then
         fi
 
         # Node.js version check — bare-ai-cli requires Node 24+
-        NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || echo "0")
+        NODE_MAJOR=$(/usr/bin/node -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || node -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || echo "0")
         if [ "${NODE_MAJOR:-0}" -lt 24 ]; then
-            echo -e "${RED}❌ Node.js v24+ is required. Current version: $(node -v 2>/dev/null || echo 'not found')${NC}"
+            echo -e "${RED}❌ Node.js v24+ is required. Current version: $(/usr/bin/node -v 2>/dev/null || node -v 2>/dev/null || echo 'not found')${NC}"
             echo -e "${YELLOW}Installing Node.js 24 via NodeSource...${NC}"
             execute_command "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -" "Add NodeSource v24 repo"
 
