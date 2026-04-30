@@ -415,9 +415,19 @@ if [ "$FAST_UPDATE" = false ]; then
             echo -e "${RED}❌ Node.js v24+ is required. Current version: $(node -v 2>/dev/null || echo 'not found')${NC}"
             echo -e "${YELLOW}Installing Node.js 24 via NodeSource...${NC}"
             execute_command "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -" "Add NodeSource v24 repo"
+
             execute_command "sudo apt-get install -y nodejs" "Install Node.js 24"
+            # Force PATH refresh — hash -r doesn't work in subshells
+            export PATH="/usr/bin:$PATH"
             hash -r 2>/dev/null || true
-            echo -e "${GREEN}✓ Node.js $(node -v) installed${NC}"
+            NODE_VERSION=$(node -v 2>/dev/null || echo 'unknown')
+            echo -e "${GREEN}✓ Node.js $NODE_VERSION installed${NC}"
+            # Re-check version after install
+            NODE_MAJOR=$(/usr/bin/node -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || echo "0")
+            if [ "${NODE_MAJOR:-0}" -lt 24 ]; then
+                echo -e "${RED}❌ Node 24 install failed. Please install manually: https://nodejs.org${NC}"
+                exit 1
+            fi
         fi
 
         NPM_MAJOR=$(npm --version 2>/dev/null | cut -d. -f1)
@@ -440,7 +450,7 @@ if [ "$FAST_UPDATE" = false ]; then
             execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
         fi
 
-        execute_command "cd \"$CLI_REPO_DIR\" && npm install --ignore-scripts && NODE_OPTIONS=\"--max-old-space-size=8192\" npm run build && npm run bundle" "Build Sovereign Engine"
+        execute_command "cd \"$CLI_REPO_DIR\" && /usr/bin/npm install --ignore-scripts && NODE_OPTIONS=\"--max-old-space-size=8192\" /usr/bin/npm run build && /usr/bin/npm run bundle" "Build Sovereign Engine"
         ENGINE_TYPE="sovereign"
 
     else
