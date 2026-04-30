@@ -1036,4 +1036,11 @@ echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to pu
 
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
-( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
+if command -v crontab &>/dev/null; then
+    ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
+    echo -e "${GREEN}✓ Thermal heartbeat scheduled${NC}"
+else
+    echo -e "${YELLOW}⚠️ crontab not found — installing...${NC}"
+    sudo apt-get install -y -qq cron 2>/dev/null && \
+    ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
+fi
