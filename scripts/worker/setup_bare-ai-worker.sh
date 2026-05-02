@@ -13,8 +13,8 @@
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
-# DATE:           2026-04-18
-# VERSION:        5.5.2 (Brain-Coupled Edition)
+# DATE:           2026-05-02
+# VERSION:        5.5.4 (Debian, Proxmox, Mint, Debian 12 on AWS/Root)
 # ==============================================================================
 
 set -euo pipefail
@@ -51,8 +51,16 @@ echo "1) Bare-AI-CLI (Sovereign, Local-First, Vault-Integrated)"
 echo "2) Gemini-CLI (Standard Google Cloud SDK)"
 read -rp "Enter choice [1 or 2]: " ENGINE_CHOICE
 
+# --- REAL USER DETECTION (SUDO TRAP FIX) ---
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+
+# --- CORE TOOLING ---
+echo -e "${YELLOW}Installing core system tools...${NC}"
+execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq jq curl wget" "Install core networking and JSON tools"
+
 # i. Define the directory and the actual file
-CONFIG_DIR="$HOME/.bare-ai/config"
+CONFIG_DIR="$TARGET_HOME/.bare-ai/config"
 CONFIG_FILE="$CONFIG_DIR/agent.env"
 
 # ii. Safely create the directory structure first
@@ -64,18 +72,19 @@ else
     ENGINE_TYPE="gemini"
 fi
 
+
 # iii. Safely touch the file and inject the engine type
 touch "$CONFIG_FILE"
 sed -i '/export ENGINE_TYPE=/d' "$CONFIG_FILE"
 echo "export ENGINE_TYPE=\"$ENGINE_TYPE\"" >> "$CONFIG_FILE"
 
 # --- DIRECTORY DEFINITIONS ---
-WORKSPACE_DIR="$HOME/.bare-ai"
+WORKSPACE_DIR="$TARGET_HOME/.bare-ai"
 BARE_AI_DIR="$WORKSPACE_DIR"
 BIN_DIR="$BARE_AI_DIR/bin"
 LOG_DIR="$BARE_AI_DIR/logs"
 DIARY_DIR="$BARE_AI_DIR/diary"
-CLI_REPO_DIR="$HOME/bare-ai-cli"
+CLI_REPO_DIR="$TARGET_HOME/bare-ai-cli"
 
 # --- SOURCE DIR DETECTION (Path Paradox Fix) ---
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -140,7 +149,7 @@ echo -e "${GREEN}✓ Directory structure created${NC}"
 
 # --- 1b. VAULT PRE-FLIGHT & INSTALLATION ---
 echo -e "\n${YELLOW}Checking Vault configuration...${NC}"
-VAULT_ENV_FILE="$HOME/.bare-ai/config/vault.env"
+VAULT_ENV_FILE="$TARGET_HOME/.bare-ai/config/vault.env"
 mkdir -p "$(dirname "$VAULT_ENV_FILE")"
 
 FINAL_VAULT_ADDR="http://127.0.0.1:8200"
@@ -168,14 +177,14 @@ fi
 if [ "$INSTALL_VAULT" = true ]; then
     echo -e "${YELLOW}Installing and Initializing Local HashiCorp Vault...${NC}"
     
-    # 1. Install Vault and jq (needed for JSON parsing)
+    # 1. Install Vault
     execute_command "wget -qO- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null" "Add HashiCorp GPG key"
     
     # Dynamically find the right codename for Mint or standard Debian/Ubuntu
     OS_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
     execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $OS_CODENAME main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null" "Add HashiCorp Repo"
     
-    execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault jq" "Install Vault & jq"
+    execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault" "Install Vault"
 
 
     # 2. Configure Persistent File Storage & Disable mlock (Survives Reboot)
@@ -220,17 +229,32 @@ EOF
     ROOT_TOKEN=$(echo "$INIT_OUT" | jq -r .root_token)
 
     # Save keys for the user
-    echo "Root Token: $ROOT_TOKEN" > "$HOME/.bare-ai/config/vault-recovery-keys.txt"
-    echo "Unseal Key: $UNSEAL_KEY" >> "$HOME/.bare-ai/config/vault-recovery-keys.txt"
-    chmod 600 "$HOME/.bare-ai/config/vault-recovery-keys.txt"
+    echo "Root Token: $ROOT_TOKEN" > "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
+    echo "Unseal Key: $UNSEAL_KEY" >> "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
+    chmod 600 "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
 
     # 5. Unseal and Login
     vault operator unseal "$UNSEAL_KEY" > /dev/null
     export VAULT_TOKEN="$ROOT_TOKEN"
 
-    # 6. Enable Engines and Auth
-    vault secrets enable -version=2 -path=secret kv > /dev/null 2>&1 || true
-    vault auth enable approle > /dev/null 2>&1 || true
+else
+    # --- EXISTING VAULT LOGIC ---
+    export VAULT_ADDR="$FINAL_VAULT_ADDR"
+    echo -e "${YELLOW}Targeting existing Vault at $VAULT_ADDR...${NC}"
+    read -rp "Enter an Admin VAULT_TOKEN to configure roles and secrets on the remote Vault (input hidden): " -s ADMIN_TOKEN
+    echo ""
+    if [ -z "$ADMIN_TOKEN" ]; then
+        echo -e "${RED}❌ Token cannot be empty. Aborting Vault setup.${NC}"
+        exit 1
+    fi
+    export VAULT_TOKEN="$ADMIN_TOKEN"
+fi
+
+# --- 6. UNIVERSAL VAULT CONFIGURATION ---    
+    
+# (This runs for both local and remote Vaults)
+echo -e "${YELLOW}Configuring KV Engine and AppRole...${NC}"
+vault secrets enable -version=2 -path=secret kv > /dev/null 2>&1 || true
 
     # 7. Write AI Policy
     vault policy write bare-ai-policy - > /dev/null <<EOF
@@ -383,8 +407,10 @@ else
         
         # Clean up any old container and spin up a fresh SearXNG
         sudo docker rm -f searxng &>/dev/null || true
-        execute_command "sudo docker run -d --name searxng -p 8080:8080 -v searxng-data:/etc/searxng --restart unless-stopped searxng/searxng" "Start SearXNG Container"
-        
+        # Pass the strict JSON override as an environment variable to guarantee API compatibility
+        JSON_FMT='{"server":{"formats":["html","json"]}}'
+        execute_command "sudo docker run -d --name searxng -p 8080:8080 -v searxng-data:/etc/searxng -e \"SEARXNG_SETTINGS=\$JSON_FMT\" --restart unless-stopped searxng/searxng" "Start SearXNG Container"
+            
         LOCAL_SEARCH_URL="http://127.0.0.1:8080"
         echo -e "\n# Sovereign Search Override" >> "$CONFIG_FILE"
         echo "export BARE_AI_SEARCH_URL=\"$LOCAL_SEARCH_URL\"" >> "$CONFIG_FILE"
@@ -487,7 +513,7 @@ fi
 
 # --- 3. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
 echo -e "${YELLOW}Deploying bare-necessities toolset to CLI workspace jail...${NC}"
-CLI_SCRIPTS_DIR="$HOME/bare-ai-cli/my-bare-scripts"
+CLI_SCRIPTS_DIR="$TARGET_HOME/bare-ai-cli/my-bare-scripts"
 
 # 1. Create the internal jail-compliant folder
 execute_command "mkdir -p \"$CLI_SCRIPTS_DIR\"" "Create CLI script jail"
@@ -543,13 +569,13 @@ fi
 #####################################################
 # --- 4b. AGENT AUTONOMY PERMISSIONS (Sudoers Patch), but only if not already root ---
 if [ "$EUID" -ne 0 ]; then
-    # Allow the agent to self-heal (apt/systemctl) without hanging on password prompts.
-    echo -e "${YELLOW}Granting limited NOPASSWD sudo rights for self-healing...${NC}"
-    # Uses a dedicated file in /etc/sudoers.d/ to keep it clean.
-    sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
-$USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/systemctl, /usr/bin/docker
+# Allow the agent to self-heal (apt/systemctl) without hanging on password prompts.
+echo -e "${YELLOW}Granting limited NOPASSWD sudo rights to $TARGET_USER for self-healing...${NC}"
+sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
+$TARGET_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/systemctl, /usr/bin/docker
 EOF
-    sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
+sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
+
 else
     echo -e "${GREEN}✓ Running as root. Skipping sudoers patch.${NC}"
 fi
@@ -697,7 +723,7 @@ echo -e "${GREEN}✓ Telemetry ping: HTTP $HTTP_CODE${NC}"
 #####################################################
 
 # --- 8. BASHRC UPDATES ---
-BASHRC_FILE="$HOME/.bashrc"
+BASHRC_FILE="$TARGET_HOME/.bashrc"
 echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
 
 if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
@@ -705,8 +731,8 @@ if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
 
 # START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 # BARE-AI PATH
-if [ -d "$HOME/.bare-ai/bin" ] ; then
-    PATH="$HOME/.bare-ai/bin:$PATH"
+if [ -d "$TARGET_HOME/.bare-ai/bin" ] ; then
+    PATH="$TARGET_HOME/.bare-ai/bin:$PATH"
 fi
 PATH_EOF
     echo -e "${GREEN}✓ PATH entry added${NC}"
@@ -721,11 +747,11 @@ cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
 bare() {
     local MODEL="${1:-}"
     local TODAY=$(date +%Y-%m-%d)
-    local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
-    local ROLE_CONST="$HOME/.bare-ai/role.md"
-    local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
-    local CONFIG="$HOME/.bare-ai/config/agent.env"
-    local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
+    local TECH_CONST="$TARGET_HOME/.bare-ai/technical-constitution.md"
+    local ROLE_CONST="$TARGET_HOME/.bare-ai/role.md"
+    local DIARY="$TARGET_HOME/.bare-ai/diary/$TODAY.md"
+    local CONFIG="$TARGET_HOME/.bare-ai/config/agent.env"
+    local VAULT_ENV="$TARGET_HOME/.bare-ai/config/vault.env"
 
     local ENGINE_TYPE="cloud"
     if [ -f "$CONFIG" ]; then
@@ -970,7 +996,7 @@ bare() {
         fi
     
         # Launch CLI normally (No infinite loops!)
-        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
+        cd "$TARGET_HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
@@ -998,16 +1024,32 @@ bare() {
     fi
 }
 
-alias bare-role='${EDITOR:-nano} ~/.bare-ai/role.md'
-alias bare-constitution='cat ~/.bare-ai/technical-constitution.md'
-alias bare-uninstall='~/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
-alias bare-update='cd ~/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
+alias bare-role='${EDITOR:-nano} '"$TARGET_HOME"'/.bare-ai/role.md'
+alias bare-constitution='cat '"$TARGET_HOME"'/.bare-ai/technical-constitution.md'
+alias bare-uninstall=''"$TARGET_HOME"'/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
+alias bare-update='cd '"$TARGET_HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
   echo -e "${GREEN}✓ bare() function added${NC}"
 else
     echo -e "${YELLOW}⚠️  bare() function already present, skipping${NC}"
+fi
+
+#####################################################
+#####################################################
+#####################################################
+
+
+# Set up 1-minute thermal heartbeat
+echo "Setting up thermal monitoring heartbeat..."
+if command -v crontab &>/dev/null; then
+    ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
+    echo -e "${GREEN}✓ Thermal heartbeat scheduled${NC}"
+else
+    echo -e "${YELLOW}⚠️ crontab not found — installing...${NC}"
+    sudo apt-get install -y -qq cron 2>/dev/null && \
+    ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
 fi
 
 #####################################################
@@ -1022,7 +1064,7 @@ echo -e "${YELLOW} www.cloudintcorp.com${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
-if grep -q "your-role-id-here" "$HOME/.bare-ai/config/vault.env" 2>/dev/null; then
+if grep -q "your-role-id-here" "$TARGET_HOME/.bare-ai/config/vault.env" 2>/dev/null; then
 echo -e "${RED}⚠️  ACTION REQUIRED: Vault Credentials Missing!${NC}"
 echo -e "${YELLOW}   You must add your real Role ID and Secret ID before running the agent.${NC}"
 echo -e "0. Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
@@ -1031,16 +1073,7 @@ fi
 echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your systems ~/.bashrc with modifications.)"
 echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< required.)"
-echo -e "4. ${GREEN}Architecture:${NC}  $ENGINE_TYPE backend loaded (<< Info only.)"
-echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge agent/cli.)"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "4. ${GREEN}Update:${NC}     bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
+echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
 
-# Set up 1-minute thermal heartbeat
-echo "Setting up thermal monitoring heartbeat..."
-if command -v crontab &>/dev/null; then
-    ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
-    echo -e "${GREEN}✓ Thermal heartbeat scheduled${NC}"
-else
-    echo -e "${YELLOW}⚠️ crontab not found — installing...${NC}"
-    sudo apt-get install -y -qq cron 2>/dev/null && \
-    ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
-fi
