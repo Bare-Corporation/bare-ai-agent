@@ -160,15 +160,37 @@ FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 INSTALL_VAULT=false
 AGENT_ROLE_ID="your-role-id-here"
 AGENT_SECRET_ID="your-secret-id-here"
+SKIP_VAULT_ADMIN=false
 
 read -rp "Do you have an existing HashiCorp Vault server for this agent? [y/N/unsure]: " HAS_VAULT
 if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
     read -rp "Enter Vault Address (e.g., https://192.168.1.50:8200): " USER_VAULT_ADDR
     echo -e "Testing connectivity to $USER_VAULT_ADDR..."
-    
+
     if curl -s -k --max-time 5 "$USER_VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 || curl -s -k --max-time 5 "$USER_VAULT_ADDR" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Vault reachable!${NC}"
         FINAL_VAULT_ADDR="$USER_VAULT_ADDR"
+
+        # Ask reuse or reset — no token required for reuse
+        echo ""
+        echo "1) Reuse existing Bare-AI secrets (Join existing Mesh — recommended)"
+        echo "2) Reset/Overwrite Bare-AI secrets (Re-seed model paths)"
+        read -rp "Select [1 or 2]: " VAULT_ACTION
+
+        if [ "${VAULT_ACTION:-1}" == "2" ]; then
+            echo -e "${YELLOW}Admin access required to re-seed Vault model paths.${NC}"
+            read -rsp "Enter Admin VAULT_TOKEN: " ADMIN_TOKEN
+            echo ""
+            if [ -z "${ADMIN_TOKEN:-}" ]; then
+                echo -e "${RED}❌ Token cannot be empty for Reset mode. Aborting.${NC}"
+                exit 1
+            fi
+            export VAULT_TOKEN="$ADMIN_TOKEN"
+            SKIP_VAULT_ADMIN=false
+        else
+            echo -e "${GREEN}✓ Reuse selected. Vault address saved. Fill in Role ID and Secret ID manually after install.${NC}"
+            SKIP_VAULT_ADMIN=true
+        fi
     else
         echo -e "${RED}❌ Cannot reach $USER_VAULT_ADDR. Falling back to local Vault installation.${NC}"
         INSTALL_VAULT=true
@@ -179,120 +201,79 @@ fi
 
 # Auto-Install Logic for Local Vault
 if [ "$INSTALL_VAULT" = true ]; then
+    SKIP_VAULT_ADMIN=false
     echo -e "${YELLOW}Installing and Initializing Local HashiCorp Vault...${NC}"
-    
-    # 1. Install Vault
+
     execute_command "wget -qO- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null" "Add HashiCorp GPG key"
-    
-    # Dynamically find the right codename for Mint or standard Debian/Ubuntu
+
     OS_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
     execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $OS_CODENAME main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null" "Add HashiCorp Repo"
-    
     execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault" "Install Vault"
 
-
-    # 2. Configure Persistent File Storage & Disable mlock (Survives Reboot)
     sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
 storage "file" {
   path = "/opt/vault/data"
 }
-
 listener "tcp" {
   address     = "127.0.0.1:8200"
   tls_disable = 1
 }
-
 api_addr = "http://127.0.0.1:8200"
 disable_mlock = true
 ui = true
 EOF
     sudo mkdir -p /opt/vault/data
     sudo chown -R vault:vault /opt/vault/data /etc/vault.d
-    
-    # Ensure Vault binary has capability to lock memory
     sudo setcap cap_ipc_lock=+ep $(readlink -f $(which vault)) 2>/dev/null || true
 
-    # 3. Start the system service (if systemd is running)
     if [ -d /run/systemd/system ]; then
         if [ "$EUID" -ne 0 ]; then
             execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
         else
             execute_command "systemctl enable vault && systemctl restart vault" "Start Vault Service"
         fi
-        sleep 3 # Wait for boot
+        sleep 3
     else
-        echo -e "${YELLOW}Warning: systemd is not running (likely inside a container). Vault must be started manually.${NC}"
+        echo -e "${YELLOW}Warning: systemd not running. Vault must be started manually.${NC}"
     fi
 
     export VAULT_ADDR="http://127.0.0.1:8200"
+    FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 
-    # 4. Initialize Vault
     echo -e "${YELLOW}Initializing Vault & generating keys...${NC}"
     INIT_OUT=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
     UNSEAL_KEY=$(echo "$INIT_OUT" | jq -r .unseal_keys_b64[0])
     ROOT_TOKEN=$(echo "$INIT_OUT" | jq -r .root_token)
 
-    # Save keys for the user
     echo "Root Token: $ROOT_TOKEN" > "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
     echo "Unseal Key: $UNSEAL_KEY" >> "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
     chmod 600 "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
 
-    # 5. Unseal and Login
     vault operator unseal "$UNSEAL_KEY" > /dev/null
     export VAULT_TOKEN="$ROOT_TOKEN"
-
-else
-
-    # --- EXISTING VAULT LOGIC ---
-    export VAULT_ADDR="$FINAL_VAULT_ADDR"
-    echo -e "${YELLOW}Targeting existing Vault at $VAULT_ADDR...${NC}"
-
-    if [ "$TIER" != "pro" ]; then
-        echo -e "${RED}⚠️ NOTICE: The Free version of Bare-AI will re-seed your Vault's Bare-AI model paths, your existing secrets should be safe.${NC}"
-        echo -e "${YELLOW}If you are attempting to join an existing Sovereign Mesh without altering your central keys, you require the Bare-AI Pro Edition.${NC}"
-        read -rp "Are you sure you want to proceed and reset your Bare-AI model secrets? [y/N]: " OVERWRITE_CONFIRM
-        if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
-            echo -e "\n${RED}❌ Installation Aborted.${NC}"
-            echo -e "${YELLOW}To continue with the Free Edition, please re-run the installer and select 'N' when asked if you have an existing Vault server.${NC}"
-            echo -e "${YELLOW}To join this node to an existing Mesh, upgrade at: ${GREEN}www.bare-ai.pro${NC}\n"
-            exit 1
-        fi
-    else
-        echo -e "${GREEN}⭐ Bare-AI Pro Edition Active: Bypassing Vault re-seed to protect existing Mesh secrets.${NC}"
-        # (Later, we can add logic here to dynamically grab the new agent's Role/Secret ID without overwriting paths)
-    fi
-
-    read -rp "Enter an Admin VAULT_TOKEN to configure roles and secrets on the remote Vault (input hidden): " -s ADMIN_TOKEN
-
-    echo ""
-    if [ -z "$ADMIN_TOKEN" ]; then
-        echo -e "${RED}❌ Token cannot be empty. Aborting Vault setup.${NC}"
-        exit 1
-    fi
-    export VAULT_TOKEN="$ADMIN_TOKEN"
 fi
 
-# --- 6. UNIVERSAL VAULT CONFIGURATION ---    
-    
-# (This runs for both local and remote Vaults)
-echo -e "${YELLOW}Configuring KV Engine and AppRole...${NC}"
-vault secrets enable -version=2 -path=secret kv > /dev/null 2>&1 || true
+# --- 6. UNIVERSAL VAULT CONFIGURATION (only runs when not reusing) ---
+if [ "$SKIP_VAULT_ADMIN" = false ]; then
+    echo -e "${YELLOW}Configuring KV Engine, AppRole and seeding models...${NC}"
 
-    # 7. Write AI Policy
+    if ! command -v vault &>/dev/null; then
+        echo -e "${RED}❌ vault binary not found. Cannot seed remote Vault.${NC}"
+        echo -e "${YELLOW}Install vault locally or choose Reuse to bypass.${NC}"
+        exit 1
+    fi
+
+    vault secrets enable -version=2 -path=secret kv > /dev/null 2>&1 || true
+    vault auth enable approle > /dev/null 2>&1 || true
     vault policy write bare-ai-policy - > /dev/null <<EOF
 path "secret/data/*" { capabilities = ["read"] }
 EOF
-
-    # 8. Configure AppRole
     vault write auth/approle/role/bare-ai-role \
         secret_id_ttl=0 token_num_uses=0 token_ttl=0 token_max_ttl=0 secret_id_num_uses=0 \
         policies="bare-ai-policy" > /dev/null
 
-    # 9. Seed Default Models
+  # 9. Seed Default Models
     echo -e "${YELLOW}Seeding default model endpoints...${NC}"
-
-    # Note: Dear end user if you are reading this then you are likely a linux power user. 
-    # Obviously this means you do not like sunlight and therefore, you already know that you can change the switchboard to your own requirements. 
 
     ### The current design is loose but follows a certain logic:
     ## xx0 = Tiny (e.g., 2B, 4B etc)
@@ -366,17 +347,16 @@ EOF
     vault kv put secret/grok-3/config base_url="https://api.x.ai/v1" model_name="grok-3" api_key="enterYourKey" > /dev/null
     
     # 10. Extract IDs for the Agent
+
     AGENT_ROLE_ID=$(vault read -field=role_id auth/approle/role/bare-ai-role/role-id)
     AGENT_SECRET_ID=$(vault write -f -field=secret_id auth/approle/role/bare-ai-role/secret-id)
-
-    FINAL_VAULT_ADDR="http://127.0.0.1:8200"
-    echo -e "${GREEN}✓ Local Vault initialized and seeded! Recovery keys at ~/.bare-ai/config/vault-recovery-keys.txt${NC}"
+    echo -e "${GREEN}✓ Vault configured and seeded successfully$FINAL_VAULT_ADDR${NC}"
 fi
 
 # Write dynamic vault.env with CIC ASCII Art
 cat << EOF > "$VAULT_ENV_FILE"
 #############################################################
-#    ____ _                  _ _       _        ____        #
+#    ____ _                  _ _       _         ____       #
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
 #  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
@@ -394,7 +374,6 @@ export VAULT_ADDR="$FINAL_VAULT_ADDR"
 export VAULT_ROLE_ID="$AGENT_ROLE_ID"
 export VAULT_SECRET_ID="$AGENT_SECRET_ID"
 EOF
-echo -e "${GREEN}✓ Vault config saved pointing to $FINAL_VAULT_ADDR${NC}"
 
 # --- 1c. SOVEREIGN SEARCH SETUP ---
 echo -e "\n${YELLOW}Checking Search Engine configuration...${NC}"
