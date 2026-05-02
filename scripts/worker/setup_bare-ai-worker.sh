@@ -78,57 +78,6 @@ touch "$CONFIG_FILE"
 sed -i '/export ENGINE_TYPE=/d' "$CONFIG_FILE"
 echo "export ENGINE_TYPE=\"$ENGINE_TYPE\"" >> "$CONFIG_FILE"
 
-# --- DIRECTORY DEFINITIONS ---
-WORKSPACE_DIR="$TARGET_HOME/.bare-ai"
-BARE_AI_DIR="$WORKSPACE_DIR"
-BIN_DIR="$BARE_AI_DIR/bin"
-LOG_DIR="$BARE_AI_DIR/logs"
-DIARY_DIR="$BARE_AI_DIR/diary"
-CLI_REPO_DIR="$TARGET_HOME/bare-ai-cli"
-
-# --- SOURCE DIR DETECTION (Path Paradox Fix) ---
-if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-    SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-else
-    SOURCE_DIR="$(pwd)"
-fi
-# Repo root is two levels up from scripts/worker/
-REPO_DIR="$(cd "$SOURCE_DIR/../.." && pwd)"
-TEMPLATES_DIR="$REPO_DIR/scripts/templates"
-BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
-
-# --- HELPER: execute_command ---
-# Runs a command autonomously, logs result as JSON, honours set -e
-execute_command() {
-    local cmd="$1"
-    local description="$2"
-
-    echo -e "\n${YELLOW}Action: $description${NC}"
-    echo -e "  Command: $cmd"
-
-    mkdir -p "$LOG_DIR"
-
-    local exit_code=0
-    eval "$cmd" || exit_code=$?
-
-    local log_file="$LOG_DIR/$(date +'%Y%m%d_%H%M%S')_$(date +%N | cut -c1-3).log"
-    local status="success"
-    [ $exit_code -ne 0 ] && status="failed"
-
-    printf '{ "timestamp": "%s", "command": "%s", "description": "%s", "status": "%s", "exit_code": %d }\n' \
-        "$(date +'%Y-%m-%dT%H:%M:%S%z')" \
-        "$(echo "$cmd"         | sed 's/"/\\"/g')" \
-        "$(echo "$description" | sed 's/"/\\"/g')" \
-        "$status" \
-        "$exit_code" > "$log_file"
-
-    if [ $exit_code -ne 0 ]; then
-        echo -e "${RED}Error executing command (exit $exit_code): $cmd${NC}"
-        return $exit_code
-    fi
-    echo -e "${GREEN}✓ Done${NC}"
-}
-
 #####################################################
 #####################################################
 #####################################################

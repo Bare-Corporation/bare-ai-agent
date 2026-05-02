@@ -6,11 +6,8 @@ Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework desi
 
 Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
-**Version:** 5.5.2 - Enterprise (Hybrid Architect Edition)  
 **Author:** Cian Egan  (CEO & Chief Architect at the Cloud Integration Corporation)
 **Created Date:** 2026-02-02
-**Updated Date:** 2026-04-26
-**Installation Repository (Start Here):** [github.com/Bare-Corporation/bare-ai-agent](https://github.com/Bare-Corporation/bare-ai-agent)
 **Main CLI Repository:** [github.com/Bare-Corporation/bare-ai-cli](https://github.com/Bare-Corporation/bare-ai-cli)
 
 ---
@@ -191,15 +188,10 @@ Run this on the target worker machine:
 
 ```bash
 
-# 1 Then Clone the bare-ai-agent repository
-git clone https://github.com/Bare-Corporation/bare-ai-agent.git ~/bare-ai-agent
-
-# 2 Launch the bare-ai-agent worker Installer
+# 1 This launches the bare-ai-agent worker Installer
 # Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
 
-cd ~/bare-ai-agent/scripts/worker
-chmod +x setup_bare-ai-worker.sh
-./setup_bare-ai-worker.sh
+curl -fsSL https://bare-ai.me/install.sh | bash
 
 ```
 
@@ -214,15 +206,9 @@ Run this on the target worker / AI Engine machine:
 # 0 You must install an AI Engine like Ollama (Default Engine)
 curl -fsSL https://ollama.com/install.sh | sh
 
-# 1 Then Clone the bare-ai-agent repository
-git clone https://github.com/Bare-Corporation/bare-ai-agent.git ~/bare-ai-agent
-
-# 2 Launch the bare-ai-agent worker Installer
-# Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI).
-
-cd ~/bare-ai-agent/scripts/worker
-chmod +x setup_bare-ai-worker.sh
-./setup_bare-ai-worker.sh
+# 1 Then launch the bare-ai-agent worker Installer
+# Note: The installer will prompt you to select your AI engine (Bare-AI-CLI or Gemini-CLI) Ensure you select Option 1.
+curl -fsSL https://bare-ai.me/install.sh | bash
 
 ```
 
