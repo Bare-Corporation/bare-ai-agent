@@ -171,14 +171,28 @@ if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
         echo -e "${GREEN}✓ Vault reachable!${NC}"
         FINAL_VAULT_ADDR="$USER_VAULT_ADDR"
 
-        # Ask reuse or reset — no token required for reuse
-        echo ""
-        echo "1) Reuse existing Bare-AI secrets (Join existing Mesh — recommended)"
-        echo "2) Reset/Overwrite Bare-AI secrets (Re-seed model paths)"
-        read -rp "Select [1 or 2]: " VAULT_ACTION
+        # --- TIER GATEKEEPER ---
+        if [ "$TIER" == "pro" ]; then
+            echo -e "\n${GREEN}⭐ Bare-AI Pro Edition Mesh detected.${NC}"
+            echo "1) Reuse existing Bare-AI secrets (Join existing Mesh — recommended)"
+            echo "2) Reset/Overwrite Bare-AI secrets (Initialize new Mesh)"
+            read -rp "Select [1 or 2]: " VAULT_ACTION
+        else
+            echo -e "\n${RED}⚠️ NOTICE: Free Edition will re-seed model paths (existing Bare-AI secrets will be lost).${NC}"
+            echo -e "${YELLOW}To join an existing Mesh without overwriting secrets, you require the Bare-AI Pro Edition.${NC}"
+            read -rp "Proceed with overwrite? [y/N]: " OVERWRITE_CONFIRM
+            if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
+                echo -e "\n${RED}❌ Installation Aborted.${NC}"
+                echo -e "${YELLOW}To join this node to an existing Mesh, upgrade at: ${GREEN}www.bare-ai.pro${NC}\n"
+                exit 1
+            fi
+            # Force the action to "reset" for Free tier
+            VAULT_ACTION="2"
+        fi
 
+        # --- EXECUTE CHOSEN ACTION ---
         if [ "${VAULT_ACTION:-1}" == "2" ]; then
-            echo -e "${YELLOW}Admin access required to re-seed Vault model paths.${NC}"
+            echo -e "${YELLOW}Admin access required to seed Vault model paths.${NC}"
             read -rsp "Enter Admin VAULT_TOKEN: " ADMIN_TOKEN
             echo ""
             if [ -z "${ADMIN_TOKEN:-}" ]; then
@@ -190,11 +204,13 @@ if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
         else
             echo -e "${GREEN}✓ Reuse selected. Vault address saved. Fill in Role ID and Secret ID manually after install.${NC}"
             SKIP_VAULT_ADMIN=true
+            export VAULT_TOKEN="not-needed-for-reuse"
         fi
     else
         echo -e "${RED}❌ Cannot reach $USER_VAULT_ADDR. Falling back to local Vault installation.${NC}"
         INSTALL_VAULT=true
     fi
+
 else
     INSTALL_VAULT=true
 fi
