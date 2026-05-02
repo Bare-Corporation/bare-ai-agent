@@ -569,16 +569,14 @@ fi
 #####################################################
 #####################################################
 # --- 4b. AGENT AUTONOMY PERMISSIONS (Sudoers Patch), but only if not already root ---
-if [ "$EUID" -ne 0 ]; then
-# Allow the agent to self-heal (apt/systemctl) without hanging on password prompts.
-echo -e "${YELLOW}Granting limited NOPASSWD sudo rights to $TARGET_USER for self-healing...${NC}"
-sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
+if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+    echo -e "${YELLOW}Granting limited NOPASSWD sudo rights to $TARGET_USER for self-healing...${NC}"
+    sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
 $TARGET_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/systemctl, /usr/bin/docker
 EOF
-sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
-
+    sudo chmod 0440 /etc/sudoers.d/bare-ai-autonomy
 else
-    echo -e "${GREEN}✓ Running as root. Skipping sudoers patch.${NC}"
+    echo -e "${GREEN}✓ No non-root user detected. Skipping sudoers patch.${NC}"
 fi
 
 #####################################################
@@ -732,8 +730,8 @@ if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
 
 # START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 # BARE-AI PATH
-if [ -d "$TARGET_HOME/.bare-ai/bin" ] ; then
-    PATH="$TARGET_HOME/.bare-ai/bin:$PATH"
+if [ -d "$HOME/.bare-ai/bin" ] ; then
+    PATH="$HOME/.bare-ai/bin:$PATH"
 fi
 PATH_EOF
     echo -e "${GREEN}✓ PATH entry added${NC}"
@@ -748,11 +746,11 @@ cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
 bare() {
     local MODEL="${1:-}"
     local TODAY=$(date +%Y-%m-%d)
-    local TECH_CONST="$TARGET_HOME/.bare-ai/technical-constitution.md"
-    local ROLE_CONST="$TARGET_HOME/.bare-ai/role.md"
-    local DIARY="$TARGET_HOME/.bare-ai/diary/$TODAY.md"
-    local CONFIG="$TARGET_HOME/.bare-ai/config/agent.env"
-    local VAULT_ENV="$TARGET_HOME/.bare-ai/config/vault.env"
+    local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
+    local ROLE_CONST="$HOME/.bare-ai/role.md"
+    local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
+    local CONFIG="$HOME/.bare-ai/config/agent.env"
+    local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
 
     local ENGINE_TYPE="cloud"
     if [ -f "$CONFIG" ]; then
@@ -997,7 +995,7 @@ bare() {
         fi
     
         # Launch CLI normally (No infinite loops!)
-        cd "$TARGET_HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
+        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
@@ -1025,10 +1023,10 @@ bare() {
     fi
 }
 
-alias bare-role='${EDITOR:-nano} '"$TARGET_HOME"'/.bare-ai/role.md'
-alias bare-constitution='cat '"$TARGET_HOME"'/.bare-ai/technical-constitution.md'
-alias bare-uninstall=''"$TARGET_HOME"'/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
-alias bare-update='cd '"$TARGET_HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
+alias bare-role='${EDITOR:-nano} '"$HOME"'/.bare-ai/role.md'
+alias bare-constitution='cat '"$HOME"'/.bare-ai/technical-constitution.md'
+alias bare-uninstall=''"$HOME"'/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
+alias bare-update='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
@@ -1065,13 +1063,13 @@ echo -e "${YELLOW} www.cloudintcorp.com${NC}"
 echo -e "${YELLOW} for:${NC}"
 echo -e "${YELLOW} www.bare-ai.net${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${YELLOW} FREE Version: www.bare-ai.me${NC}"
-echo -e "${YELLOW} PRO Version:www.bare-ai.pro${NC}"
+echo -e "${YELLOW} FREE VERSION: www.bare-ai.me${NC}"
+echo -e "${YELLOW} PRO VERSION:www.bare-ai.pro${NC}"
 echo -e "${YELLOW} ENTERPRISE VERSION: www.bare-ai.biz${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
-if grep -q "your-role-id-here" "$TARGET_HOME/.bare-ai/config/vault.env" 2>/dev/null; then
+if grep -q "your-role-id-here" "$HOME/.bare-ai/config/vault.env" 2>/dev/null; then
 echo -e "${RED}⚠️  ACTION REQUIRED: Vault Credentials Missing!${NC}"
 echo -e "${YELLOW}   You must add your real Role ID and Secret ID before running the agent.${NC}"
 echo -e "0. Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
@@ -1081,6 +1079,6 @@ echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your
 echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< required.)"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "4. ${GREEN}Update:${NC}     bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
+echo -e "4. ${GREEN}Update:${NC}        bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
 echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
 
