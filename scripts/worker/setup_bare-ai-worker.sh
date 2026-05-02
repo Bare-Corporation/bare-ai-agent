@@ -240,7 +240,15 @@ else
     # --- EXISTING VAULT LOGIC ---
     export VAULT_ADDR="$FINAL_VAULT_ADDR"
     echo -e "${YELLOW}Targeting existing Vault at $VAULT_ADDR...${NC}"
+    echo -e "${RED}⚠️ WARNING: The Free version of Bare-AI will re-seed your Vault and OVERWRITE existing model secrets!${NC}"
+    echo -e "${YELLOW}If you are joining an existing Sovereign Mesh, please upgrade to Bare-AI Pro (www.bare-ai.pro).${NC}"
+    read -rp "Are you sure you want to proceed and overwrite existing secrets? [y/N]: " OVERWRITE_CONFIRM
+    if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
+        echo -e "${GREEN}Aborting Vault seeding. Please manually add your Role ID and Secret ID to ~/.bare-ai/config/vault.env${NC}"
+        exit 0
+    fi
     read -rp "Enter an Admin VAULT_TOKEN to configure roles and secrets on the remote Vault (input hidden): " -s ADMIN_TOKEN
+
     echo ""
     if [ -z "$ADMIN_TOKEN" ]; then
         echo -e "${RED}❌ Token cannot be empty. Aborting Vault setup.${NC}"
