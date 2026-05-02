@@ -31,12 +31,17 @@ sudo -v
 # Keep-alive: update existing sudo time stamp if set, until script has finished
 while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
-# --- FAST UPDATE CHECK ---
+# --- ARGUMENT PARSING ---
 FAST_UPDATE=false
-if [[ "${1:-}" == "--fast" ]]; then
-    FAST_UPDATE=true
-    echo -e "${YELLOW}FAST MODE: Skipping engine rebuild. Updating config & Menu only...${NC}"
-fi
+TIER="free" # Default to free tier
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --fast) FAST_UPDATE=true; echo -e "${YELLOW}FAST MODE: Skipping engine rebuild...${NC}" ;;
+        --tier) TIER="$2"; shift ;;
+    esac
+    shift
+done
 
 # --- DOCKER / Podman WARNING ---
 if [ ! -f "/.dockerenv" ]; then
@@ -241,15 +246,22 @@ else
     # --- EXISTING VAULT LOGIC ---
     export VAULT_ADDR="$FINAL_VAULT_ADDR"
     echo -e "${YELLOW}Targeting existing Vault at $VAULT_ADDR...${NC}"
-    echo -e "${RED}⚠️ NOTICE: The Free version of Bare-AI will re-seed your Vault's Bare-AI model paths, your existing secrets should be safe..${NC}"
-    echo -e "${YELLOW}If you are attempting to join an existing Sovereign Mesh, you require the Bare-AI Pro Edition.${NC}"
-    read -rp "Are you sure you want to proceed and overwrite existing secrets? [y/N]: " OVERWRITE_CONFIRM
-    if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
-        echo -e "\n${RED}❌ Installation Aborted.${NC}"
-        echo -e "${YELLOW}To continue with the Free Edition, please re-run the installer and select 'N' when asked if you have an existing Vault server (this will install a fresh, isolated local Vault).${NC}"
-        echo -e "${YELLOW}To join this node to an existing Sovereign Mesh without overwriting secrets, upgrade at: ${GREEN}www.bare-ai.pro${NC}\n"
-        exit 1
+
+    if [ "$TIER" != "pro" ]; then
+        echo -e "${RED}⚠️ NOTICE: The Free version of Bare-AI will re-seed your Vault's Bare-AI model paths, your existing secrets should be safe.${NC}"
+        echo -e "${YELLOW}If you are attempting to join an existing Sovereign Mesh without altering your central keys, you require the Bare-AI Pro Edition.${NC}"
+        read -rp "Are you sure you want to proceed and reset your Bare-AI model secrets? [y/N]: " OVERWRITE_CONFIRM
+        if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
+            echo -e "\n${RED}❌ Installation Aborted.${NC}"
+            echo -e "${YELLOW}To continue with the Free Edition, please re-run the installer and select 'N' when asked if you have an existing Vault server.${NC}"
+            echo -e "${YELLOW}To join this node to an existing Mesh, upgrade at: ${GREEN}www.bare-ai.pro${NC}\n"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}⭐ Bare-AI Pro Edition Active: Bypassing Vault re-seed to protect existing Mesh secrets.${NC}"
+        # (Later, we can add logic here to dynamically grab the new agent's Role/Secret ID without overwriting paths)
     fi
+
     read -rp "Enter an Admin VAULT_TOKEN to configure roles and secrets on the remote Vault (input hidden): " -s ADMIN_TOKEN
 
     echo ""
