@@ -241,7 +241,7 @@ else
     # --- EXISTING VAULT LOGIC ---
     export VAULT_ADDR="$FINAL_VAULT_ADDR"
     echo -e "${YELLOW}Targeting existing Vault at $VAULT_ADDR...${NC}"
-    echo -e "${RED}⚠️ WARNING: The Free version of Bare-AI will re-seed your Vault and OVERWRITE existing model secrets!${NC}"
+    echo -e "${RED}⚠️ NOTICE: The Free version of Bare-AI will re-seed your Vault's Bare-AI model paths, your existing secrets should be safe..${NC}"
     echo -e "${YELLOW}If you are attempting to join an existing Sovereign Mesh, you require the Bare-AI Pro Edition.${NC}"
     read -rp "Are you sure you want to proceed and overwrite existing secrets? [y/N]: " OVERWRITE_CONFIRM
     if [[ ! "$OVERWRITE_CONFIRM" =~ ^[Yy]$ ]]; then
