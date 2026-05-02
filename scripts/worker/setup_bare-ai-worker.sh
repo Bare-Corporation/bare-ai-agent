@@ -55,6 +55,56 @@ read -rp "Enter choice [1 or 2]: " ENGINE_CHOICE
 TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 
+
+# --- DIRECTORY DEFINITIONS ---
+WORKSPACE_DIR="$TARGET_HOME/.bare-ai"
+BARE_AI_DIR="$WORKSPACE_DIR"
+BIN_DIR="$BARE_AI_DIR/bin"
+LOG_DIR="$BARE_AI_DIR/logs"
+DIARY_DIR="$BARE_AI_DIR/diary"
+CLI_REPO_DIR="$TARGET_HOME/bare-ai-cli"
+
+# --- SOURCE DIR DETECTION (Path Paradox Fix) ---
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    SOURCE_DIR="$(pwd)"
+fi
+REPO_DIR="$(cd "$SOURCE_DIR/../.." && pwd)"
+TEMPLATES_DIR="$REPO_DIR/scripts/templates"
+BARE_NECESSITIES_DIR="$REPO_DIR/scripts/bare-necessities"
+
+# --- HELPER: execute_command ---
+execute_command() {
+    local cmd="$1"
+    local description="$2"
+
+    echo -e "\n${YELLOW}Action: $description${NC}"
+    echo -e "  Command: $cmd"
+
+    mkdir -p "$LOG_DIR"
+
+    local exit_code=0
+    eval "$cmd" || exit_code=$?
+
+    local log_file="$LOG_DIR/$(date +'%Y%m%d_%H%M%S')_$(date +%N | cut -c1-3).log"
+    local status="success"
+    [ $exit_code -ne 0 ] && status="failed"
+
+    printf '{ "timestamp": "%s", "command": "%s", "description": "%s", "status": "%s", "exit_code": %d }\n' \
+        "$(date +'%Y-%m-%dT%H:%M:%S%z')" \
+        "$(echo "$cmd"         | sed 's/"/\\"/g')" \
+        "$(echo "$description" | sed 's/"/\\"/g')" \
+        "$status" \
+        "$exit_code" > "$log_file"
+
+    if [ $exit_code -ne 0 ]; then
+        echo -e "${RED}Error executing command (exit $exit_code): $cmd${NC}"
+        return $exit_code
+    fi
+    echo -e "${GREEN}✓ Done${NC}"
+}
+
 # --- CORE TOOLING ---
 echo -e "${YELLOW}Installing core system tools...${NC}"
 execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq jq curl wget" "Install core networking and JSON tools"
@@ -1008,8 +1058,14 @@ fi
 # --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
-echo -e "${YELLOW} A Cloud Integration Corporation Custom Build${NC}"
+echo -e "${YELLOW} A Cloud Integration Corporation Build${NC}"
 echo -e "${YELLOW} www.cloudintcorp.com${NC}"
+echo -e "${YELLOW} for:${NC}"
+echo -e "${YELLOW} www.bare-ai.net${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${YELLOW} FREE Version: www.bare-ai.me${NC}"
+echo -e "${YELLOW} PRO Version:www.bare-ai.pro${NC}"
+echo -e "${YELLOW} ENTERPRISE VERSION: www.bare-ai.biz${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
