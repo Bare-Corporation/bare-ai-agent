@@ -35,4 +35,4 @@ fi
 echo -e "${YELLOW}Launching BARE-AI Worker Installer...${NC}"
 cd "$REPO_DIR/scripts/worker"
 chmod +x setup_bare-ai-worker.sh
-./setup_bare-ai-worker.sh --tier pro "$@" < /dev/tty
+./setup_bare-ai-worker.sh --tier free "$@" < /dev/tty
