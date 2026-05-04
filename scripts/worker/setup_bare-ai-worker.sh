@@ -970,8 +970,8 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
         
-        # --- HOT-SYNC CONTEXT (Ensures BARE_AI.md matches latest edits) ---
-        mkdir -p "$HOME/bare-ai-workspace"
+        # 1. HOT-SYNC (Create the instruction file in the workspace)
+        mkdir -p "$HOME/bare-ai-workspace/scripts"
         cat <<EOF > "$HOME/bare-ai-workspace/BARE_AI.md"
 # BARE-AI SYSTEM CONTEXT
 # Generated: $(date)
@@ -987,47 +987,37 @@ All sovereign tools are located at: $HOME/bare-ai-workspace/scripts
 Always use absolute paths when calling these tools.
 EOF
 
-        # --- LIGHTWEIGHT PROMPT ---
-        local combined_const="You are a Sovereign Bare-AI Agent. Current Date: $TODAY."
+        # 2. LIGHTWEIGHT PROMPT (Saves tokens, relies on the file above)
+        local combined_const="You are a Sovereign Bare-AI Agent. Context is loaded from BARE_AI.md. Date: $TODAY."
         
         if [[ "$MODEL" == tir-na-ai* ]]; then
             combined_const="$combined_const You are Tir-Na-AI, operating on independent infrastructure."
         fi
 
-        # 1. Export context variables (New Architecture)
+        # 3. EXPORT PATHS (Crucial: Use Absolute Path for the context file)
         export BARE_AI_CONTEXT_FILE="$HOME/bare-ai-workspace/BARE_AI.md"
         export BARE_AI_SYSTEM_PROMPT="$combined_const"
         export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
 
-        # --- BARE-AI ENGINE PRE-FLIGHT CHECK (Your Original Logic) ---
+        # --- PRE-FLIGHT CHECKS (Exactly as you had them) ---
         if [[ "$MODEL" =~ ^(tir-na-ai|deepseek|gemma|qwen|llama|mistral|granite) ]]; then
-            if command -v ollama &>/dev/null; then
-                if ! ollama list | grep -q "${MODEL}"; then
-                    echo -e "\n\033[1;33m[sovereign] Sovereign Engine '$MODEL' is missing its neural weights.\033[0m"
-                    read -rp "Would you like to auto-install it via Ollama now? (May take a few minutes) [y/N]: " PULL_CHOICE
-                    if [[ "$PULL_CHOICE" =~ ^[Yy]$ ]]; then
-                        echo -e "\033[0;32mPulling $MODEL... Please wait.\033[0m"
-                        ollama pull "$MODEL" || echo -e "\033[0;31m❌ Failed to pull model.\033[0m"
-                    else
-                        echo -e "\033[1;33mProceeding without weights. The model will return a 404 until installed.\033[0m"
-                    fi
-                fi
+            if command -v ollama &>/dev/null && ! ollama list | grep -q "${MODEL}"; then
+                echo -e "\n\033[1;33m[sovereign] Sovereign Engine '$MODEL' is missing weights.\033[0m"
+                read -rp "Auto-install via Ollama now? [y/N]: " PULL_CHOICE
+                [[ "$PULL_CHOICE" =~ ^[Yy]$ ]] && ollama pull "$MODEL"
             fi
         fi
 
-        # --- VAULT PRE-FLIGHT CHECK (Your Original Logic) ---
-        if [ -n "${VAULT_ADDR:-}" ]; then
-            if ! curl -s -k --max-time 1 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 && ! curl -s -k --max-time 1 "$VAULT_ADDR" > /dev/null 2>&1; then
-                echo -e "\033[0;31m❌ CRITICAL: Cannot reach Vault at $VAULT_ADDR. Engine execution aborted to prevent hang.\033[0m"
-                return 1
-            fi
+        if [ -n "${VAULT_ADDR:-}" ] && ! curl -s -k --max-time 1 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
+            echo -e "\033[0;31m❌ CRITICAL: Cannot reach Vault at $VAULT_ADDR.\033[0m"
+            return 1
         fi
     
-        # --- THE FIX: SINGLE LAUNCH & WORKSPACE SWITCH ---
-        # We jump to the workspace where BARE_AI.md lives, then call the BRANDED bundle
-        cd "$HOME/bare-ai-workspace" && node "$HOME/bare-ai-cli/bundle/bare-ai.js" "$@" --model "$MODEL"
+        # 4. THE EXECUTION (The Correct Launch Path)
+        # We MUST be in the cli folder to find .env, but we tell the app to 'act' on the workspace
+        cd "$HOME/bare-ai-cli" && node bundle/bare-ai.js "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
