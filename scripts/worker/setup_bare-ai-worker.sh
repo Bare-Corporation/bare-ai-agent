@@ -952,37 +952,35 @@ bare() {
     export BARE_AI_DIARY="$DIARY"
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
+        # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
 
-        # --- BUILD BARE_AI.md IN THE CLI's WORKING DIRECTORY ---
-        # bare-ai-cli is a fork of gemini-cli and reads BARE_AI.md from its CWD
-        # exactly the same way gemini-cli reads GEMINI.md. Writing it here on
-        # every invocation keeps the context fresh without bloating the API prompt.
-        {
-            # 1. Sovereign Identity (only for Tir-Na-AI models)
-            if [[ "$MODEL" == tir-na-ai* ]]; then
-                echo "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."
-                echo ""
-            fi
+        # --- DYNAMIC IDENTITY & CONTEXT INJECTION ---
+        local combined_const=""
+        
+        # 1. Sovereign Identity (Only for Tir-Na-AI models)
+        if [[ "$MODEL" == tir-na-ai* ]]; then
+            combined_const="You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."$'\n\n'
+        fi
 
-            # 2. Technical Constitution (Doers only — Thinkers skip to save context)
-            if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
-                sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST"
-            else
-                echo "You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."
-                echo ""
-            fi
+        # 2. Context Window Optimizer (Tools vs No-Tools)
+        if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
+            # Doers get the heavy technical constitution
+            combined_const="${combined_const}$(cat "$TECH_CONST")"
+        else
+            # Thinkers save context window space with a lightweight directive
+            combined_const="${combined_const}You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."$'\n\n'
+        fi
 
-            # 3. Role Constitution
-            if [ -f "$ROLE_CONST" ]; then
-                echo ""
-                echo "### ROLE & MISSION ###"
-                echo ""
-                sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST"
-            fi
-        } > "$HOME/bare-ai-cli/BARE_AI.md"
+        # 3. Append Role Constitution (if it exists)
+        if [ -f "$ROLE_CONST" ]; then
+            combined_const="${combined_const}"$'\n\n### ROLE & MISSION ###\n\n'"$(cat "$ROLE_CONST")"
+        fi
 
-        # Minimal system prompt — the heavy context is now in BARE_AI.md
-        export BARE_AI_SYSTEM_PROMPT="You are a Sovereign Bare-AI Agent. Today is $TODAY."
+        # Replace the date placeholder
+        combined_const=$(echo "$combined_const" | sed "s|{{DATE}}|$TODAY|g")
+
+        # Force the CLI to use this combined string
+        export BARE_AI_SYSTEM_PROMPT="$combined_const"
         export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
