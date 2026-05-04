@@ -530,7 +530,7 @@ fi
 
 # --- 3. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
 echo -e "${YELLOW}Deploying bare-necessities toolset to CLI workspace jail...${NC}"
-CLI_SCRIPTS_DIR="$TARGET_HOME/bare-ai-cli/my-bare-scripts"
+CLI_SCRIPTS_DIR="$TARGET_HOME/bare-ai-workspace/scripts"
 
 # 1. Create the internal jail-compliant folder
 execute_command "mkdir -p \"$CLI_SCRIPTS_DIR\"" "Create CLI script jail"
@@ -696,6 +696,24 @@ fi
 
 ln -sf "$ROLE_CONST" "$REPO_DIR/role.md"
 echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
+
+# Create the workspace if it doesn't exist
+mkdir -p "$TARGET_HOME/bare-ai-workspace"
+
+# Generate the BARE_AI.md context file (this is what the AI 'reads')
+cat <<EOF > "$TARGET_HOME/bare-ai-workspace/BARE_AI.md"
+# BARE-AI SYSTEM CONTEXT
+
+## TECHNICAL CONSTITUTION
+$(cat "$TECH_CONST_SRC")
+
+## ROLE CONSTITUTION
+$(cat "$ROLE_STARTER")
+
+## TOOLBOX LOCATION
+All sovereign tools are located at: $TARGET_HOME/bare-ai-workspace/scripts
+Always use absolute paths when calling these tools.
+EOF
 
 #####################################################
 #####################################################
@@ -931,7 +949,6 @@ bare() {
 
     export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
 
-
     # Dynamic Tool Capability Mapping
     case "$MODEL" in
         tir-na-ai:*|deepseek-r1*|deepseek-coder*|deepseek-reasoner|gemma4:*|o1-preview) 
@@ -952,40 +969,39 @@ bare() {
     export BARE_AI_DIARY="$DIARY"
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
-        # MERGE BOTH FILES INTO ONE TEMP SYSTEM PROMPT
-
-        # --- DYNAMIC IDENTITY & CONTEXT INJECTION ---
-        local combined_const=""
         
-        # 1. Sovereign Identity (Only for Tir-Na-AI models)
+        # --- HOT-SYNC CONTEXT (Ensures BARE_AI.md matches latest edits) ---
+        mkdir -p "$HOME/bare-ai-workspace"
+        cat <<EOF > "$HOME/bare-ai-workspace/BARE_AI.md"
+# BARE-AI SYSTEM CONTEXT
+# Generated: $(date)
+
+## TECHNICAL CONSTITUTION
+$(cat "$TECH_CONST")
+
+## ROLE CONSTITUTION
+$(cat "$ROLE_CONST")
+
+## TOOLBOX LOCATION
+All sovereign tools are located at: $HOME/bare-ai-workspace/scripts
+Always use absolute paths when calling these tools.
+EOF
+
+        # --- LIGHTWEIGHT PROMPT ---
+        local combined_const="You are a Sovereign Bare-AI Agent. Current Date: $TODAY."
+        
         if [[ "$MODEL" == tir-na-ai* ]]; then
-            combined_const="You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."$'\n\n'
+            combined_const="$combined_const You are Tir-Na-AI, operating on independent infrastructure."
         fi
 
-        # 2. Context Window Optimizer (Tools vs No-Tools)
-        if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
-            # Doers get the heavy technical constitution
-            combined_const="${combined_const}$(cat "$TECH_CONST")"
-        else
-            # Thinkers save context window space with a lightweight directive
-            combined_const="${combined_const}You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."$'\n\n'
-        fi
-
-        # 3. Append Role Constitution (if it exists)
-        if [ -f "$ROLE_CONST" ]; then
-            combined_const="${combined_const}"$'\n\n### ROLE & MISSION ###\n\n'"$(cat "$ROLE_CONST")"
-        fi
-
-        # Replace the date placeholder
-        combined_const=$(echo "$combined_const" | sed "s|{{DATE}}|$TODAY|g")
-
-        # Force the CLI to use this combined string
+        # 1. Export context variables (New Architecture)
+        export BARE_AI_CONTEXT_FILE="$HOME/bare-ai-workspace/BARE_AI.md"
         export BARE_AI_SYSTEM_PROMPT="$combined_const"
         export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
 
-        # --- BARE-AI ENGINE PRE-FLIGHT CHECK ---
+        # --- BARE-AI ENGINE PRE-FLIGHT CHECK (Your Original Logic) ---
         if [[ "$MODEL" =~ ^(tir-na-ai|deepseek|gemma|qwen|llama|mistral|granite) ]]; then
             if command -v ollama &>/dev/null; then
                 if ! ollama list | grep -q "${MODEL}"; then
@@ -1001,17 +1017,17 @@ bare() {
             fi
         fi
 
-        # --- VAULT PRE-FLIGHT CHECK ---
+        # --- VAULT PRE-FLIGHT CHECK (Your Original Logic) ---
         if [ -n "${VAULT_ADDR:-}" ]; then
-            # Added -k to bypass self-signed SSL errors on HTTPS IP addresses
             if ! curl -s -k --max-time 1 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 && ! curl -s -k --max-time 1 "$VAULT_ADDR" > /dev/null 2>&1; then
                 echo -e "\033[0;31m❌ CRITICAL: Cannot reach Vault at $VAULT_ADDR. Engine execution aborted to prevent hang.\033[0m"
                 return 1
             fi
         fi
     
-        # Launch CLI normally (No infinite loops!)
-        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
+        # --- THE FIX: SINGLE LAUNCH & WORKSPACE SWITCH ---
+        # We jump to the workspace where BARE_AI.md lives, then call the BRANDED bundle
+        cd "$HOME/bare-ai-workspace" && node "$HOME/bare-ai-cli/bundle/bare-ai.js" "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
