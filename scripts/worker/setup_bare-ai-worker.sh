@@ -162,7 +162,7 @@ AGENT_ROLE_ID="your-role-id-here"
 AGENT_SECRET_ID="your-secret-id-here"
 SKIP_VAULT_ADMIN=false
 
-read -rp "Do you have an existing HashiCorp Vault server for this agent? [y/N/unsure]: " HAS_VAULT
+read -rp "Do you have an existing OpenBao Vault server for this agent? [y/N/unsure]: " HAS_VAULT
 if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
     read -rp "Enter Vault Address (e.g., https://192.168.1.50:8200): " USER_VAULT_ADDR
     echo -e "Testing connectivity to $USER_VAULT_ADDR..."
@@ -218,17 +218,26 @@ fi
 # Auto-Install Logic for Local Vault
 if [ "$INSTALL_VAULT" = true ]; then
     SKIP_VAULT_ADMIN=false
-    echo -e "${YELLOW}Installing and Initializing Local HashiCorp Vault...${NC}"
 
-    execute_command "wget -qO- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null" "Add HashiCorp GPG key"
+    echo -e "${YELLOW}Downloading and Installing OpenBao (Open-Source Vault)...${NC}"
+    
+    # Install unzip if missing
+    execute_command "sudo apt-get install -y -qq unzip" "Install unzip"
 
-    OS_CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-    execute_command "echo \"deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $OS_CODENAME main\" | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null" "Add HashiCorp Repo"
-    execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq vault" "Install Vault"
+    # Download OpenBao Linux AMD64 binary
+    execute_command "wget -q https://github.com/openbao/openbao/releases/download/v2.0.0/bao_2.0.0_linux_amd64.zip -O /tmp/bao.zip" "Download OpenBao v2.0.0"
+    execute_command "cd /tmp && unzip -q bao.zip && sudo mv bao /usr/local/bin/bao && sudo chmod +x /usr/local/bin/bao" "Extract and install OpenBao binary"
+    
+    # Create the symlink so all 'vault' commands in this script (and the user's system) still work flawlessly
+    execute_command "sudo ln -sf /usr/local/bin/bao /usr/local/bin/vault" "Alias OpenBao as vault"
 
-    sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
+    # Create OpenBao configuration and user
+    sudo useradd --system --home /etc/bao --no-create-home bao 2>/dev/null || true
+    sudo mkdir -p /etc/bao.d /opt/bao/data
+    
+    sudo tee /etc/bao.d/bao.hcl > /dev/null <<EOF
 storage "file" {
-  path = "/opt/vault/data"
+  path = "/opt/bao/data"
 }
 listener "tcp" {
   address     = "127.0.0.1:8200"
@@ -238,21 +247,50 @@ api_addr = "http://127.0.0.1:8200"
 disable_mlock = true
 ui = true
 EOF
-    sudo mkdir -p /opt/vault/data
-    sudo chown -R vault:vault /opt/vault/data /etc/vault.d
-    sudo setcap cap_ipc_lock=+ep $(readlink -f $(which vault)) 2>/dev/null || true
+
+    sudo chown -R bao:bao /opt/bao/data /etc/bao.d
+    sudo setcap cap_ipc_lock=+ep $(readlink -f $(which bao)) 2>/dev/null || true
+
+    # Create the systemd service file
+    sudo tee /etc/systemd/system/bao.service > /dev/null <<EOF
+[Unit]
+Description="OpenBao secret management tool"
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+User=bao
+Group=bao
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+SecureBits=keep-caps
+AmbientCapabilities=CAP_IPC_LOCK
+Capabilities=CAP_IPC_LOCK+ep
+CapabilityBoundingSet=CAP_SYSLOG CAP_IPC_LOCK
+NoNewPrivileges=yes
+ExecStart=/usr/local/bin/bao server -config=/etc/bao.d/bao.hcl
+ExecReload=/bin/kill --signal HUP \$MAINPID
+KillMode=process
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
     if [ -d /run/systemd/system ]; then
-        if [ "$EUID" -ne 0 ]; then
-            execute_command "sudo systemctl enable vault && sudo systemctl restart vault" "Start Vault Service"
-        else
-            execute_command "systemctl enable vault && systemctl restart vault" "Start Vault Service"
-        fi
+        execute_command "sudo systemctl daemon-reload && sudo systemctl enable bao && sudo systemctl restart bao" "Start OpenBao Service"
         sleep 3
     else
-        echo -e "${YELLOW}Warning: systemd not running. Vault must be started manually.${NC}"
+        echo -e "${YELLOW}Warning: systemd not running. OpenBao must be started manually.${NC}"
     fi
-
+    
     export VAULT_ADDR="http://127.0.0.1:8200"
     FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 
@@ -398,7 +436,7 @@ cat << EOF > "$VAULT_ENV_FILE"
 #  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
 #   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
 #                                                           #
-# Bare-AI Vault Credentials                                 #
+# Bare-AI OpenBao (Vault) Credentials                       #
 #############################################################
 #  by the Cloud Integration Corporation                     #
 #############################################################
