@@ -2,7 +2,7 @@
 
 Bare-AI-Agent is a multi-node, self-healing architecture designed to manage data pipelines and infrastructure integrity across Linux and Windows environments. The system supports **dual AI engines** — choose between the sovereign Bare-AI-CLI or Google's Gemini-CLI.
 
-Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using HashiCorp Vault for secrets management and SearXNG for private web grounding.
+Bare-ai-agent is a local-first, privacy-hardened autonomous agent framework designed for Debian-based Linux hosts. It bridges the gap between high-performance cloud models and sovereign local infrastructure using OpenBao (the Linux Foundation's 100% open-source fork of HashiCorp Vault) for BSL-free secrets management, and SearXNG for private web grounding.
 
 Note: a very early alpha of bare-ai-agent for windows is pre bundled but only works with gemini cli at present. as bare-ai-cli has only been built tested for debian based systems currently. This is not further documented for now but the intention is for it to follow the same design principles as bare-ai-agent / bare-ai-cli for linux.
 
@@ -16,7 +16,7 @@ Note: a very early alpha of bare-ai-agent for windows is pre bundled but only wo
 - **Identity:** Autonomous Linux Agent with Level 4 Autonomy.
 - **Security:** Zero-Knowledge local secret injection via Vault AppRole.
 - **Intelligence:** Hybrid routing between Google Gemma 4 (31B) and local optimised models (DeepSeek, Granite).
-- **Grounding:** Sovereign search via SearXNG (Chinese & Global results).
+- **Grounding:** Sovereign search via SearXNG (Global search results).
 - **Telemetry:** Real-time hardware audits via the `bare-necessities` toolkit.
 - **Self-Healing Data Pipelines:** Autonomous error detection and log sniping.
 - **Context Management:** High-speed AST mapping for large codebases.
@@ -30,7 +30,7 @@ The AI model(s): 1 centralised High-Performance VM or PC running an LLM (e.g., O
 
 The Worker Hands: Unlimited lightweight VMs running bare-ai-agent and bare-ai-cli.
 
-The Memory: A centralised HashiCorp Vault server to manage endpoints and keys securely across the fleet.
+The Memory: A centralised OpenBao Vault server to manage endpoints and keys securely across the fleet.
 
 The fleet follows a strict role-based hierarchy to ensure safety and scalability:
 
@@ -95,9 +95,9 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 
 ---
 
-## 🔐 Managing API Keys with HashiCorp Vault (Mandatory)
+## 🔐 Managing API Keys with OpenBao Vault (Mandatory)
 
-Bare-AI uses a locally hosted HashiCorp Vault to secure your API keys and model configurations. You do **not** need to store plain-text API keys in your `.bashrc` or environment variables. The setup script automatically configures the Vault and creates a "Sovereign Switchboard" of pre-mapped models with dummy API keys. 
+Bare-AI uses a locally hosted OpenBao Vault to secure your API keys and model configurations. You do **not** need to store plain-text API keys in your `.bashrc` or environment variables. The setup script automatically configures the Vault and creates a "Sovereign Switchboard" of pre-mapped models with dummy API keys. 
 
 To activate a Premium Cloud model, you simply need to "patch" the existing secret with your real API key.
 
@@ -124,7 +124,7 @@ During installation, your Vault Root Token and Unseal Key were generated and sav
 ```bash
 ~/.bare-ai/config/vault-recovery-keys.txt
 ```
-The Reboot Reality: HashiCorp Vault automatically seals itself every time the system reboots. If your machine restarts, the Bare-AI engine will fail to load. You must manually unseal the Vault by running:
+The Reboot Reality: OpenBao Vault automatically seals itself every time the system reboots. If your machine restarts, the Bare-AI engine will fail to load. You must manually unseal the Vault by running:
 
 ```bash
 vault operator unseal
@@ -239,9 +239,10 @@ Session logs are automatically saved to `~/.bare-ai/diary/YYYY-MM-DD.md` with en
 
 ```
 
-## 📁 Hashi Corp Vault Important Notes for Cloud AIs (Gemini, GPT, Claude, Deepseek, Grok etc)
+## 📁 OpenBao Vault Important Notes for Cloud AIs (Gemini, GPT, Claude, Deepseek, Grok etc)
+## OpenBao Vault is the truly open source version of OpenBao Vault.
 
-*1) Vault has been pre-injected with every model in the sovereign swithboard automatically as part of the installation script including the api end point for the given cloud models.
+*1) OpenBao Vault has been pre-injected with every model in the sovereign swithboard automatically as part of the installation script including the api end point for the given cloud models.
 
 *2) All you need to do is to PATCH the given secrets with your actual API keys. Note each model has its own secret so you can have different api keys for different vendors models ie for different cost center etc or simply reuse the same api key for the same vendor (only).
 
@@ -298,6 +299,22 @@ After installation, runtime config is auto-created at `~/.bare-ai/`:
 ```
 
 ---
+
+## What's New in v5.5.4
+
+This release marks a massive architectural shift to guarantee absolute licensing sovereignty for our enterprise users. 
+
+- ✅ **BSL Freedom (OpenBao Migration):** Completely ripped out proprietary HashiCorp Vault and replaced it with OpenBao (Linux Foundation). The agent now defaults to a 5-key Shamir secret sharing threshold out-of-the-box.
+- ✅ **Proxmox Safety Uninstaller:** Re-wrote the uninstaller `pkill` logic to surgically target Node.js paths, ensuring host hypervisors (Proxmox VMs) are not accidentally terminated during cleanup.
+- ✅ **Toolkit Stability:** Fixed the `set -e` abort crash in the `bare-necessities` thermal logic.
+
+## What's New in v5.5.3
+
+This release lays the architectural groundwork for the Bare-AI Pro Edition, introducing intelligent installation routing and tier-based feature toggles.
+
+- ✅ **Tier-Based Feature Flags:** Implemented dynamic tier detection within the core installer (e.g., `--tier pro`) to safely gate premium capabilities like Vault secret re-use and Mesh network joining.
+- ✅ **Dual Bootstrap Routing:** Re-architected the `curl` deployment pipeline to support distinct installation paths, ensuring Free and Pro nodes receive their specific configurations seamlessly. 
+- ✅ **Pro Infrastructure Foundations:** Shipped the initial `install-pro.sh` deployment script, paving the way for multi-node enterprise mesh configurations.
 
 ## What's New in v5.5.2
 
