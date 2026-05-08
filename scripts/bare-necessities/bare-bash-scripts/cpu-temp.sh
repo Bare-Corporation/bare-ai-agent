@@ -64,7 +64,7 @@ declare -a READINGS=()
 
 # 1. lm-sensors — Intel coretemp, AMD k10temp, board sensors (most accurate)
 probe_lm_sensors() {
-  command -v sensors >/dev/null 2>&1 || return
+  command -v sensors >/dev/null 2>&1 || return 0
   # sensors -A gives cleaner output; -u gives machine-parseable SI units
   while IFS= read -r line; do
     # Match lines like: "Core 0:         +42.0°C  (high = +80.0°C"
@@ -80,7 +80,7 @@ probe_lm_sensors() {
 
 # 2. NVIDIA GPU (nvidia-smi)
 probe_nvidia() {
-  command -v nvidia-smi >/dev/null 2>&1 || return
+  command -v nvidia-smi >/dev/null 2>&1 || return 0
   local idx=0
   while IFS=',' read -r name temp; do
     name=$(echo "$name" | xargs)
@@ -93,7 +93,7 @@ probe_nvidia() {
 
 # 3. AMD GPU (ROCm — rocm-smi)
 probe_amd_gpu() {
-  command -v rocm-smi >/dev/null 2>&1 || return
+  command -v rocm-smi >/dev/null 2>&1 || return 0
   local idx=0
   while IFS= read -r line; do
     # Matches: "GPU[0]          : Temperature (Sensor edge) (C): 55.0"
@@ -107,7 +107,7 @@ probe_amd_gpu() {
 
 # 4. Raspberry Pi / Jetson (vcgencmd)
 probe_vcgencmd() {
-  command -v vcgencmd >/dev/null 2>&1 || return
+  command -v vcgencmd >/dev/null 2>&1 || return 0
   local raw
   raw=$(vcgencmd measure_temp 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' || echo "")
   [ -n "$raw" ] && READINGS+=("SoC|${raw}|vcgencmd")
