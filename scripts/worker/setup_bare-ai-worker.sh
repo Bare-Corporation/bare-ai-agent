@@ -256,17 +256,37 @@ EOF
     export VAULT_ADDR="http://127.0.0.1:8200"
     FINAL_VAULT_ADDR="http://127.0.0.1:8200"
 
-    echo -e "${YELLOW}Initializing Vault & generating keys...${NC}"
-    INIT_OUT=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
-    UNSEAL_KEY=$(echo "$INIT_OUT" | jq -r .unseal_keys_b64[0])
+    echo -e "${YELLOW}Initializing Vault & generating keys (5 shares, threshold 3)...${NC}"
+    INIT_OUT=$(vault operator init -key-shares=5 -key-threshold=3 -format=json)
     ROOT_TOKEN=$(echo "$INIT_OUT" | jq -r .root_token)
+    KEY_FILE="$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
 
-    echo "Root Token: $ROOT_TOKEN" > "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
-    echo "Unseal Key: $UNSEAL_KEY" >> "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
-    chmod 600 "$TARGET_HOME/.bare-ai/config/vault-recovery-keys.txt"
+    # Write the security warning and Root Token
+    cat << EOF > "$KEY_FILE"
+======================================================================
+⚠️ CRITICAL SECURITY NOTICE ⚠️
+Store these keys in a secure password manager (e.g., Bitwarden) IMMEDIATELY.
+Once safely stored, you MUST DELETE THIS FILE. 
+Leaving this file on the disk compromises your agent's sovereignty.
+======================================================================
 
-    vault operator unseal "$UNSEAL_KEY" > /dev/null
+Root Token: $ROOT_TOKEN
+Unseal Keys:
+EOF
+    
+    # Extract and append all 5 Unseal Keys
+    echo "$INIT_OUT" | jq -r '.unseal_keys_b64[]' >> "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+
+    # Automatically unseal using the first 3 keys to meet the threshold
+    echo -e "${YELLOW}Applying 3 unseal keys to unlock Vault...${NC}"
+    for i in {0..2}; do
+        KEY=$(echo "$INIT_OUT" | jq -r ".unseal_keys_b64[$i]")
+        vault operator unseal "$KEY" > /dev/null
+    done
+    
     export VAULT_TOKEN="$ROOT_TOKEN"
+
 fi
 
 # --- 6. UNIVERSAL VAULT CONFIGURATION (only runs when not reusing) ---
