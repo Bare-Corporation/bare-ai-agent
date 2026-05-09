@@ -1012,8 +1012,6 @@ bare() {
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
 
         # --- BUILD BARE_AI.md IN THE CLI's WORKING DIRECTORY ---
-        # bare-ai-cli is a fork of gemini-cli and reads BARE_AI.md from its CWD
-        # exactly the same way gemini-cli reads GEMINI.md. Writing it here on
         # every invocation keeps the context fresh without bloating the API prompt.
         {
             # 1. Sovereign Identity (only for Tir-Na-AI models)
@@ -1022,20 +1020,20 @@ bare() {
                 echo ""
             fi
 
-            # 2. Technical Constitution (Doers only — Thinkers skip to save context)
-            if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
-                sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST"
-            else
-                echo "You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."
+            # 2. Primary Role Constitution (MOVED TO TOP TO CURE PRIMACY BIAS)
+            if [ -f "$ROLE_CONST" ]; then
+                sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST"
+                echo ""
                 echo ""
             fi
 
-            # 3. Role Constitution
-            if [ -f "$ROLE_CONST" ]; then
+            # 3. Technical Constitution & Bridge (NOW AT THE BOTTOM)
+            if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
+                sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST"
+            else
+                echo "# 🛡️ THE BARE-AI TECHNICAL DIRECTIVE"
+                echo "***CRITICAL CONTEXT***: You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."
                 echo ""
-                echo "### ROLE & MISSION ###"
-                echo ""
-                sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST"
             fi
         } > "$HOME/bare-ai-cli/BARE_AI.md"
 
@@ -1083,12 +1081,21 @@ bare() {
 
     else
         echo -e "\033[1;33m✨ [Engine: Gemini CLI | Model: $MODEL]\033[0m"
-        local combined_const
-        combined_const=$(sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST")
+        local combined_const=""
+        
+        # 1. Primary Role Constitution (MOVED TO TOP)
         if [ -f "$ROLE_CONST" ]; then
-            combined_const="${combined_const}"$'\n\n---\n\n'"$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")"
+            combined_const=$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")
+            combined_const="${combined_const}"$'\n\n---\n\n'
         fi
+        
+        # 2. Technical Constitution & Bridge (NOW AT THE BOTTOM)
+        if [ -f "$TECH_CONST" ]; then
+            combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST")"
+        fi
+        
         gemini -m "$MODEL" -i "$combined_const" "$@"
+        
         # Log forwarding
         if [ -f "GEMINI.md" ]; then
             echo -e "\n--- SESSION APPENDED: $(date) [gemini] ---" >> "$DIARY"
