@@ -224,9 +224,9 @@ if [ "$INSTALL_VAULT" = true ]; then
     # Install unzip if missing
     execute_command "sudo apt-get install -y -qq unzip" "Install unzip"
 
-    # Download OpenBao Linux AMD64 binary (.tar.gz format)
-   execute_command "wget -q https://github.com/openbao/openbao/releases/download/v2.0.0/bao_2.0.0_Linux_amd64.tar.gz -O /tmp/bao.tar.gz" "Download OpenBao v2.0.0"
-   execute_command "cd /tmp && tar -xzf bao.tar.gz && sudo mv bao /usr/local/bin/bao && sudo chmod +x /usr/local/bin/bao" "Extract and install OpenBao binary"
+    # Download and extract OpenBao binary (universal Linux tarball)
+    execute_command "wget -q https://github.com/openbao/openbao/releases/download/v2.0.0/bao_2.0.0_Linux_x86_64.tar.gz -O /tmp/bao.tar.gz" "Download OpenBao v2.0.0"
+    execute_command "cd /tmp && tar -xzf bao.tar.gz && sudo mv bao /usr/local/bin/bao && sudo chmod +x /usr/local/bin/bao" "Extract and install OpenBao binary"
     
     # Create the symlink so all 'vault' commands in this script (and the user's system) still work flawlessly
     execute_command "sudo ln -sf /usr/local/bin/bao /usr/local/bin/vault" "Alias OpenBao as vault"
