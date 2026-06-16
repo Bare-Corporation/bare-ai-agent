@@ -395,29 +395,48 @@ EOF
 
     #9b  PREMIUM CLOUD Defaults
 
+    #  Gemini Models
+
     vault kv put secret/gemini-2.5-flash-lite/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash-lite" api_key="enterYourKey" > /dev/null
     vault kv put secret/gemini-2.5-flash/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash" api_key="enterYourKey" > /dev/null
     vault kv put secret/gemini-2.5-pro/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-pro" api_key="enterYourKey" > /dev/null
     vault kv put secret/gemini-3-flash-preview/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-3-flash-preview" api_key="enterYourKey" > /dev/null
     vault kv put secret/gemini-3.1-pro-preview/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-3.1-pro-preview" api_key="enterYourKey" > /dev/null
+
+     #  GPT Models
     vault kv put secret/gpt-4o/config base_url="https://api.openai.com/v1" model_name="gpt-4o" api_key="enterYourKey" > /dev/null
     vault kv put secret/gpt-4-turbo/config base_url="https://api.openai.com/v1" model_name="gpt-4-turbo" api_key="enterYourKey" > /dev/null
     vault kv put secret/o1-preview/config base_url="https://api.openai.com/v1" model_name="o1-preview" api_key="enterYourKey" > /dev/null
     vault kv put secret/gpt-5.5/config base_url="https://api.openai.com/v1" model_name="gpt-5.5" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
+
+     #  Claude Models
     vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
+        vault kv put secret/claude-opus-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-6" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
+        vault kv put secret/claude-opus-4-8/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-8" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-fable-5/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-fable-5" api_key="enterYourKey" > /dev/null
+
+    # Deepseek Models
     vault kv put secret/deepseek-chat/config base_url="https://api.deepseek.com/v1" model_name="deepseek-chat" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-reasoner/config base_url="https://api.deepseek.com/v1" model_name="deepseek-reasoner" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-v4-flash/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-flash" api_key="enterYourKey" > /dev/null
     vault kv put secret/deepseek-v4-pro/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-pro" api_key="enterYourKey" > /dev/null
+
+    # Qwen Models
     vault kv put secret/qwen-plus/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-plus" api_key="enterYourKey" > /dev/null
     vault kv put secret/qwen-max/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-max" api_key="enterYourKey" > /dev/null
+   
+    #Kimi Models
     vault kv put secret/moonshot-v1-32k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-32k" api_key="enterYourKey" > /dev/null
     vault kv put secret/moonshot-v1-200k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-200k" api_key="enterYourKey" > /dev/null
     vault kv put secret/kimi-k5/config base_url="https://api.moonshot.cn/v1" model_name="kimi-k5" api_key="enterYourKey" > /dev/null
+
+    #Mistral Models
     vault kv put secret/mistral-large-latest/config base_url="https://api.mistral.ai/v1" model_name="mistral-large-latest" api_key="enterYourKey" > /dev/null
     vault kv put secret/codestral-latest/config base_url="https://api.mistral.ai/v1" model_name="codestral-latest" api_key="enterYourKey" > /dev/null
+    
+    #Grok Models
     vault kv put secret/grok-4-1-fast-reasoning/config base_url="https://api.x.ai/v1" model_name="grok-4-1-fast-reasoning" api_key="enterYourKey" > /dev/null
     vault kv put secret/grok-3/config base_url="https://api.x.ai/v1" model_name="grok-3" api_key="enterYourKey" > /dev/null
     
@@ -885,9 +904,12 @@ bare() {
         echo -e "   155) gpt-5.5                [gpt-5.5]"
 
         echo -e " \033[1;33m[The Claude Collection]\033[0m"
-        echo -e "   201) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
-        echo -e "   202) Claude-sonnet-4-6      [claude-sonnet-4-6]"
-        echo -e "   203) Claude-opus-4-7        [claude-opus-4-7]"
+        echo -e "   225) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
+        echo -e "   236) Claude-sonnet-4-6      [claude-sonnet-4-6]"
+        echo -e "   246) Claude-opus-4-6        [claude-opus-4-6]"
+        echo -e "   247) Claude-opus-4-7        [claude-opus-4-7]"
+        echo -e "   248) Claude-opus-4-8        [claude-opus-4-8]"
+        echo -e "   250) Claude-fable-5         [claude-fable-5]"
 
         echo -e " \033[1;33m[The Depths of Deepseek]\033[0m"
         echo -e "   301) deepseek-chat          [deepseek-chat]"
@@ -943,9 +965,12 @@ bare() {
             152) MODEL="gpt-4-turbo" ;;
             153) MODEL="o1-preview" ;;
             155) MODEL="gpt-5.5" ;;
-            201) MODEL="claude-haiku-4-5-20251001" ;;
-            202) MODEL="claude-sonnet-4-6" ;;
-            203) MODEL="claude-opus-4-7" ;;
+            225) MODEL="claude-haiku-4-5-20251001" ;;
+            236) MODEL="claude-sonnet-4-6" ;;
+            246) MODEL="claude-opus-4-6" ;;
+            247) MODEL="claude-opus-4-7" ;;
+            248) MODEL="claude-opus-4-8" ;;
+            250) MODEL="claude-fable-5" ;;
             301) MODEL="deepseek-chat" ;;
             302) MODEL="deepseek-reasoner" ;;
             303) MODEL="deepseek-v4-flash" ;;
@@ -1145,13 +1170,13 @@ fi
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
 echo -e "${YELLOW} A Cloud Integration Corporation Build${NC}"
-echo -e "${YELLOW} www.cloudintcorp.com${NC}"
+echo -e "${YELLOW} www.cloudintegrationcorporation.com${NC}"
 echo -e "${YELLOW} for:${NC}"
 echo -e "${YELLOW} www.bare-ai.net${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${YELLOW} FREE VERSION: www.bare-ai.me${NC}"
-echo -e "${YELLOW} PRO VERSION:www.bare-ai.pro${NC}"
-echo -e "${YELLOW} ENTERPRISE VERSION: www.bare-ai.biz${NC}"
+echo -e "${YELLOW} PRO VERSION:www.bare-ai.pro (coming soon)${NC}"
+echo -e "${YELLOW} ENTERPRISE VERSION: www.bare-ai.biz (est Q4 2026)${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
 # 10.a Check if Vault needs configuration
