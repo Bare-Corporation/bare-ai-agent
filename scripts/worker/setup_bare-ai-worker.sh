@@ -1063,7 +1063,7 @@ bare() {
                 echo "***CRITICAL CONTEXT***: You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."
                 echo ""
             fi
-        } > "$HOME/bare-ai-cli/BARE_AI.md"
+        } > "$HOME/bare-ai-workspace/bare-functional-role/BARE_AI.md"
 
         # Minimal system prompt — the heavy context is now in BARE_AI.md
         export BARE_AI_SYSTEM_PROMPT="You are a Sovereign Bare-AI Agent. Today is $TODAY."

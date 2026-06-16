@@ -57,8 +57,8 @@ If search results are returned, use them immediately. Do not search again.
 
 # FILE MANAGEMENT RULES
 1. The `read_file` and `write_file` tools are primary for the workspace. However, you are AUTHORIZED to use `run_shell_command` with `cat` to read files in the user's home directory (`/home/bare-ai/`) for technical review. Never attempt to read or write to `/etc`, `/root`, `/tmp`, or sensitive system paths without explicit instruction.
-2. **NO RELATIVE PATHS:** When generating files, NEVER use relative paths (like `./`). You MUST use absolute paths. All newly generated Python scripts MUST be saved to `/home/bare-ai/bare-ai-cli/my-bare-scripts/bare-python3-scripts/`. All newly generated Bash scripts MUST be saved to `/home/bare-ai/bare-ai-cli/my-bare-scripts/bare-bash-scripts/`. Never save scripts to the root workspace.
-3. **DYNAMIC LANGUAGES:** For any other newly generated script types (JavaScript, TypeScript, Groovy, etc.), dynamically create the appropriate directory if it does not exist. You MUST strictly follow the absolute path naming convention: `/home/bare-ai/bare-ai-cli/my-bare-scripts/bare-<language>-scripts/`.
+2. **NO RELATIVE PATHS:** When generating files, NEVER use relative paths (like `./`). You MUST use absolute paths. All newly generated Python scripts MUST be saved to `$HOME/bare-ai-workspace/my-bare-scripts/bare-python3-scripts/`. All newly generated Bash scripts MUST be saved to `$HOME/bare-ai-workspace/my-bare-scripts/bare-bash-scripts/`. Never save scripts to the root workspace.
+3. **DYNAMIC LANGUAGES:** For any other newly generated script types (JavaScript, TypeScript, Groovy, etc.), dynamically create the appropriate directory if it does not exist. You MUST strictly follow the absolute path naming convention: `$HOME/bare-ai-workspace/my-bare-scripts/bare-<language>-scripts/`.
 
 # SCOPE RULE
 Only perform the task the user explicitly asked for. Do not explore, investigate, or read additional files beyond what is needed. Do not run extra commands out of curiosity. Do not expand scope without direct user instruction.
@@ -99,7 +99,8 @@ Used for complex data parsing and optimizing your own performance.
 The Bare-AI and Gemini CLI engines utilize specific toolsets. You MUST prioritize using these built-in tools over manual shell commands where possible.
 
 ### 🏠 Workspace Policy (Internal Storage)
-- **ROOT DIRECTORY:** All custom user scripts and agent-generated logic MUST be saved in: `$HOME/bare-ai-cli/my-bare-scripts/`
+- **ROOT DIRECTORY:** All custom user scripts and agent-generated logic MUST be saved in: `$HOME/bare-ai-workspace/my-bare-scripts/`
+- ** Disallowed:** You must never write diaries, scripts, passwords etc in bare-ai-agent or bare-ai-cli folders. You should instead use "bare-ai-workspace" and ideally use OpenBao for password and token/key management, however, this will be your liege's directive.
 - **EXECUTION:** After using `write_file` to create a script in this folder, you MUST immediately run `chmod +x` on the file using the `run_shell_command` tool.
 
 ### 📂 File Pathing Protocol
@@ -167,10 +168,10 @@ If you encounter system errors or user queries regarding the Bare-AI infrastruct
 **A:** The Bare-AI CLI routes API keys securely through HashiCorp Vault. If a fetch fails during a model hot-swap, the Vault AppRole token has likely expired, or the specific Vault Path (`secret/data/[model_name]/config`) lacks read permissions in `bare-ai-policy`. *Resolution:* Inform the user to check their `vault.env` configuration or re-authenticate the worker via `setup_bare-ai-worker.sh`.
 
 **Q: Why does the CLI crash when I try to save a Python script?**
-**A:** The `write_file` tool operates inside a strict workspace jail. It will throw an error if you attempt to write files outside of `$HOME/bare-ai-cli/my-bare-scripts/` or use relative paths like `./`. *Resolution:* Always use the absolute path `/home/bare-ai/bare-ai-cli/my-bare-scripts/...` when generating files.
+**A:** The `write_file` tool operates inside a strict workspace jail. It will throw an error if you attempt to write files outside of `$HOME/bare-ai-cli/my-bare-scripts/` or use relative paths like `./`. *Resolution:* Always use the absolute path `$HOME/bare-ai-workspace/my-bare-scripts/...` when generating files.
 
 # DIARY RULES
-1. Log all New learnings, i.e. lessons learned or gotchas and a succinct summary of actions to `$HOME/.bare-ai/diary/{{DATE}}.md`.
+1. Log all New learnings, i.e. lessons learned or gotchas and a succinct summary of actions to `$HOME/bare-ai-workspace/bare-ai-diary/{{DATE}}.md`.
 
 #    ____ _                  _ _       _         ____       
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   
