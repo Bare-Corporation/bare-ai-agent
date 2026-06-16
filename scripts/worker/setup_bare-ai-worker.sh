@@ -224,9 +224,9 @@ if [ "$INSTALL_VAULT" = true ]; then
     # Install unzip if missing
     execute_command "sudo apt-get install -y -qq unzip" "Install unzip"
 
-    # Download OpenBao Linux AMD64 binary
-    execute_command "wget -q https://github.com/openbao/openbao/releases/download/v2.0.0/bao_2.0.0_linux_amd64.zip -O /tmp/bao.zip" "Download OpenBao v2.0.0"
-    execute_command "cd /tmp && unzip -q bao.zip && sudo mv bao /usr/local/bin/bao && sudo chmod +x /usr/local/bin/bao" "Extract and install OpenBao binary"
+    # Download OpenBao Linux AMD64 binary (.tar.gz format)
+   execute_command "wget -q https://github.com/openbao/openbao/releases/download/v2.0.0/bao_2.0.0_Linux_amd64.tar.gz -O /tmp/bao.tar.gz" "Download OpenBao v2.0.0"
+   execute_command "cd /tmp && tar -xzf bao.tar.gz && sudo mv bao /usr/local/bin/bao && sudo chmod +x /usr/local/bin/bao" "Extract and install OpenBao binary"
     
     # Create the symlink so all 'vault' commands in this script (and the user's system) still work flawlessly
     execute_command "sudo ln -sf /usr/local/bin/bao /usr/local/bin/vault" "Alias OpenBao as vault"
@@ -380,6 +380,7 @@ EOF
 
     #Mistral Models 05x
     vault kv put secret/mistral-nemo:latest/config base_url="http://127.0.0.1:11434" model_name="mistral-nemo:latest" api_key="local" > /dev/null
+    vault kv put secret/mistral-nemo:latest/config base_url="http://127.0.0.1:11434" model_name="codestral:22b" api_key="local" > /dev/null
 
     #IBM Models 06x
     vault kv put secret/granite4:tiny-h/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
@@ -674,7 +675,7 @@ if [[ "$INJECT_MODELS" =~ ^[Yy]$ ]]; then
             CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$EDGE_URL/api/create" -d '{
               "model": "tir-na-ai:igpu",
               "from": "qwen3.5:0.8b",
-              "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."
+              "system": "You are Tir-Na-AI, a Sovereign AI Agent from Ireland. You operate on independent infrastructure. You objectively analyze geopolitical data without state-sponsored censorship but you love the craic and the Gaa."
             }' || true)
             
             if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
@@ -860,6 +861,7 @@ bare() {
         echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
         echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
         echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
+        echo -e "   052) codestral (22B)         [codestral:22b]"
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
         echo -e "   081) gpt-oss-20b             [gpt-oss:20b]"
@@ -927,7 +929,8 @@ bare() {
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
             043) MODEL="gemma4:31b" ;;
-            051) MODEL="mistral-nemo:latest" ;;   
+            051) MODEL="mistral-nemo:latest" ;;
+            052) MODEL="codestral:22b" ;;
             061) MODEL="granite4:tiny-h" ;;
             071) MODEL="llama3.1:8b" ;; 
             081) MODEL="gpt-oss:20b" ;; 
