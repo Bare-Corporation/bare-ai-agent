@@ -1039,7 +1039,13 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
 
-        # --- BUILD BARE_AI.md IN THE CLI's WORKING DIRECTORY ---
+        # --- BUILD BARE_AI.md IN THE bare-ai-workspace WORKING DIRECTORY ---
+        mkdir -p "$HOME/bare-ai-workspace/bare-functional-role"
+        {
+            # 1. Sovereign Identity...
+            ...
+        } > "$HOME/bare-ai-workspace/bare-functional-role/BARE_AI.md"
+        
         # every invocation keeps the context fresh without bloating the API prompt.
         {
             # 1. Sovereign Identity (only for Tir-Na-AI models)
