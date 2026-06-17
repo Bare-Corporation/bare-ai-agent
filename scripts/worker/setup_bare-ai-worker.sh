@@ -1081,46 +1081,35 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
 
-        # --- BUILD BARE_AI.md IN THE PERSISTENT AGENT WORKSPACE ---
-        # This directory is also where the CLI is launched FROM below — never
-        # from inside bare-ai-cli/ — so this file, the session log (BARE.md),
-        # and any other relative-path output the CLI produces all stay inside
-        # bare-ai-workspace/ and never pollute the git-tracked CLI repo.
-        local ROLE_BRIDGE_DIR="$HOME/bare-ai-workspace/bare-functional-role"
-        mkdir -p "$ROLE_BRIDGE_DIR"
+        # --- DYNAMIC IDENTITY & CONTEXT INJECTION ---
+        # Built as a shell variable only — never written to any file inside
+        # bare-ai-cli/, so this can never collide with bare-ai-cli's own
+        # native BARE_AI.md project-memory file, and never risks blocking
+        # 'git pull' / 'bare-update'.
+        local combined_const=""
 
-        # Extract the shield marker dynamically from the deployed technical
-        # constitution's first line, so the no-tools fallback below never
-        # drifts out of sync if the marker is ever regenerated.
+        # 1. Role Constitution FIRST — must appear above the shield marker
+        # in technical-constitution.md, per the directive's instructions.
+        if [ -f "$ROLE_CONST" ]; then
+            combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")"$'\n\n'
+        fi
+
+        # 2. Tir-Na-AI Sovereign Identity (only for Tir-Na-AI models)
+        if [[ "$MODEL" == tir-na-ai* ]]; then
+            combined_const="${combined_const}You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."$'\n\n'
+        fi
+
+        # 3. Technical Constitution (contains the shield marker at its start)
         local SHIELD_MARKER
         SHIELD_MARKER=$(head -1 "$TECH_CONST" | awk '{print $3}')
+        if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
+            combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST")"
+        else
+            combined_const="${combined_const}# 🛡️ ${SHIELD_MARKER} THE BARE-AI TECHNICAL DIRECTIVE"$'\n'
+            combined_const="${combined_const}***CRITICAL CONTEXT***: Everything above the marker \"🛡️ ${SHIELD_MARKER}\" is your Primary Agent Identity. You are currently operating in pure reasoning and chat mode — system tools and workspace execution are disabled for this session."$'\n\n'
+        fi
 
-        {
-            # 1. Sovereign Identity (only for Tir-Na-AI models)
-            if [[ "$MODEL" == tir-na-ai* ]]; then
-                echo "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."
-                echo ""
-            fi
-
-            # 2. Primary Role Constitution (kept above the shield marker)
-            if [ -f "$ROLE_CONST" ]; then
-                sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST"
-                echo ""
-                echo ""
-            fi
-
-            # 3. Technical Constitution & Bridge (shield marker lives here)
-            if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
-                sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST"
-            else
-                echo "# 🛡️ ${SHIELD_MARKER} THE BARE-AI TECHNICAL DIRECTIVE"
-                echo "***CRITICAL CONTEXT***: Everything above the marker \"🛡️ ${SHIELD_MARKER}\" is your Primary Agent Identity. You are currently operating in pure reasoning and chat mode — system tools and workspace execution are disabled for this session."
-                echo ""
-            fi
-        } > "$ROLE_BRIDGE_DIR/BARE_AI.md"
-
-        # Minimal system prompt — the heavy context is now in BARE_AI.md
-        export BARE_AI_SYSTEM_PROMPT="You are a Sovereign Bare-AI Agent. Today is $TODAY."
+        export BARE_AI_SYSTEM_PROMPT="$combined_const"
         export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
@@ -1149,12 +1138,16 @@ bare() {
                 return 1
             fi
         fi
-    
-        # Launch CLI from the persistent workspace bridge directory — NEVER
-        # from inside bare-ai-cli/ — so session logs (BARE.md), the merged
-        # BARE_AI.md context, or any other relative-path output the CLI
-        # produces never land inside the git-tracked CLI repo.
-        cd "$ROLE_BRIDGE_DIR" && node "$HOME/bare-ai-cli/sovereign.js" "$@" --model "$MODEL"
+
+        # Launch from bare-ai-cli/ — sovereign.js resolves its own bundle
+        # relative to the working directory, so this cwd is required. The
+        # agent itself must never write files here; only this launcher
+        # touches this directory, and only to invoke node. Any transient
+        # session log (BARE.md) is captured into the diary and deleted
+        # immediately below; the auto-stash safety net in
+        # setup_bare-ai-worker.sh catches any leftovers if a session ever
+        # exits abnormally before that cleanup runs.
+        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
@@ -1165,6 +1158,7 @@ bare() {
         fi
 
     else
+
         echo -e "\033[1;33m✨ [Engine: Gemini CLI | Model: $MODEL]\033[0m"
 
         
