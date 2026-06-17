@@ -13,8 +13,10 @@
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
 # AUTHOR:         Cian Egan
-# DATE:           2026-05-02
-# VERSION:        5.5.4 (Debian, Proxmox, Mint, Debian 12 on AWS/Root)
+# DATE:           2026-06-17
+# VERSION:        5.6.0 (Debian, Proxmox, Mint, Debian 12 on AWS/Root)
+# CHANGELOG:      Added persistent bare-ai-workspace separation — the agent
+#                 now NEVER writes inside the git-tracked bare-ai-cli repo.
 # ==============================================================================
 
 set -euo pipefail
@@ -66,8 +68,20 @@ WORKSPACE_DIR="$TARGET_HOME/.bare-ai"
 BARE_AI_DIR="$WORKSPACE_DIR"
 BIN_DIR="$BARE_AI_DIR/bin"
 LOG_DIR="$BARE_AI_DIR/logs"
-DIARY_DIR="$BARE_AI_DIR/diary"
 CLI_REPO_DIR="$TARGET_HOME/bare-ai-cli"
+
+# --- AGENT WORKSPACE (separate from the git-tracked CLI repo) ---
+# Everything the agent writes — custom scripts, merged role/constitution
+# context, session bridges — lives here. NEVER inside bare-ai-cli/, so that
+# 'git pull' / 'bare-update' never conflicts with agent-authored files and
+# users never need to run 'git stash'. This directory and its contents are
+# NEVER deleted by this installer, on fresh install or on update — every
+# operation against it below uses 'mkdir -p', which is purely additive.
+BARE_AI_WORKSPACE_DIR="$TARGET_HOME/bare-ai-workspace"
+AGENT_SCRIPTS_DIR="$BARE_AI_WORKSPACE_DIR/my-bare-scripts"     # agent-authored, never overwritten by this installer
+CLI_SCRIPTS_DIR="$BARE_AI_WORKSPACE_DIR/scripts"               # official toolkit, refreshed on every install/update
+ROLE_BRIDGE_DIR="$BARE_AI_WORKSPACE_DIR/bare-functional-role"  # merged role+constitution context, rewritten fresh each session
+DIARY_DIR="$BARE_AI_WORKSPACE_DIR/bare-ai-diary"               # Bare-AI keeps a diary of its work locally.
 
 # --- SOURCE DIR DETECTION (Path Paradox Fix) ---
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -146,6 +160,15 @@ if [ ! -d "$BARE_AI_DIR" ] || [ ! -d "$DIARY_DIR" ] || [ ! -d "$LOG_DIR" ] || [ 
     exit 1
 fi
 echo -e "${GREEN}✓ Directory structure created${NC}"
+
+#####################################################
+#####################################################
+#####################################################
+
+# --- 1a. AGENT WORKSPACE SETUP (Persistent — survives updates & reinstalls) ---
+echo -e "${YELLOW}Creating persistent agent workspace (separate from bare-ai-cli)...${NC}"
+execute_command "mkdir -p \"$AGENT_SCRIPTS_DIR/bare-bash-scripts\" \"$AGENT_SCRIPTS_DIR/bare-python3-scripts\" \"$CLI_SCRIPTS_DIR\" \"$ROLE_BRIDGE_DIR\"" "Create bare-ai-workspace directory structure"
+echo -e "${GREEN}✓ Agent workspace ready at $BARE_AI_WORKSPACE_DIR (never wiped by this installer)${NC}"
 
 #####################################################
 #####################################################
@@ -391,8 +414,9 @@ EOF
     #Open AI
     vault kv put secret/gpt-oss:20b/config base_url="http://127.0.0.1:11434" model_name="gpt-oss:20b" api_key="local" > /dev/null
 
-    
-
+     #Z.AI
+    vault kv put secret/glm-5.2:cloud/config base_url="http://127.0.0.1:11434" model_name="glm-5.2:cloud" api_key="local" > /dev/null
+  
     #9b  PREMIUM CLOUD Defaults
 
     #  Gemini Models
@@ -412,9 +436,9 @@ EOF
      #  Claude Models
     vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
-        vault kv put secret/claude-opus-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-6" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-opus-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-6" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
-        vault kv put secret/claude-opus-4-8/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-8" api_key="enterYourKey" > /dev/null
+    vault kv put secret/claude-opus-4-8/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-8" api_key="enterYourKey" > /dev/null
     vault kv put secret/claude-fable-5/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-fable-5" api_key="enterYourKey" > /dev/null
 
     # Deepseek Models
@@ -568,6 +592,11 @@ if [ "$FAST_UPDATE" = false ]; then
             execute_command "git clone https://github.com/Bare-Corporation/bare-ai-cli.git \"$CLI_REPO_DIR\"" "Clone Bare-AI-CLI"
         else
             echo -e "${GREEN}Existing CLI found. Pulling latest...${NC}"
+            # Safety net: if the agent (or a past bug) ever wrote files directly
+            # into the git-tracked CLI repo, auto-stash them so 'git pull' never
+            # blocks an update and the user never has to run 'git stash' by hand.
+            # Going forward the agent only ever writes inside bare-ai-workspace/.
+            execute_command "cd \"$CLI_REPO_DIR\" && if [ -n \"\$(git status --porcelain)\" ]; then git stash --include-untracked; fi" "Auto-stash any stray changes in CLI repo before update"
             execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
         fi
 
@@ -607,11 +636,9 @@ fi
 #####################################################
 
 # --- 3. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
-echo -e "${YELLOW}Deploying bare-necessities toolset to CLI workspace jail...${NC}"
-CLI_SCRIPTS_DIR="$TARGET_HOME/bare-ai-workspace/scripts"
-
-# 1. Create the internal jail-compliant folder
-execute_command "mkdir -p \"$CLI_SCRIPTS_DIR\"" "Create CLI script jail"
+# CLI_SCRIPTS_DIR (official, installer-managed toolkit) lives inside
+# bare-ai-workspace/ — see "AGENT WORKSPACE" definitions near the top.
+echo -e "${YELLOW}Deploying bare-necessities toolset to persistent agent workspace...${NC}"
 
 if [ -d "$BARE_NECESSITIES_DIR" ]; then
     # 2. Sync toolkit to the jail
@@ -795,6 +822,19 @@ This directory stores the persistent configuration and memory for the BARE-AI ag
 - **config/agent.env** — Agent config (AGENT_ID, ENGINE_TYPE)
 - **config/vault.env** — Vault credentials 
 
+## The Agent Workspace (sibling directory: ~/bare-ai-workspace/)
+This is where the agent actually lives and works day to day. It is kept
+completely separate from the git-tracked ~/bare-ai-cli/ repository so that
+'git pull' / 'bare-update' never conflicts with anything the agent has
+written, and you never need to run 'git stash' manually.
+
+- **my-bare-scripts/** — agent-authored custom scripts. NEVER touched or
+  overwritten by this installer, on fresh install or update.
+- **scripts/** — the official bare-necessities toolkit. Refreshed from the
+  bare-ai-agent repo on every install/update.
+- **bare-functional-role/** — the live merged role + technical constitution
+  context (BARE_AI.md), rebuilt fresh every time you run 'bare'.
+
 ## Customising Your Agent
 Edit ~/.bare-ai/role.md to define this agent's personality, mission, and domain rules.
 The technical-constitution.md is managed by the repo — do not edit it directly.
@@ -842,7 +882,7 @@ bare() {
     local TODAY=$(date +%Y-%m-%d)
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
-    local DIARY="$HOME/.bare-ai/diary/$TODAY.md"
+    local DIARY="$HOME/bare-ai-workspace/bare-ai-diary/$TODAY.md"
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
 
@@ -884,6 +924,7 @@ bare() {
         echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
         echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
         echo -e "   081) gpt-oss-20b             [gpt-oss:20b]"
+        echo -e "   092) glm-5.2:cloud           [glm-5.2:cloud]"
 
         echo -e "-----------------------------------------------------"
 
@@ -955,7 +996,8 @@ bare() {
             052) MODEL="codestral:22b" ;;
             061) MODEL="granite4:tiny-h" ;;
             071) MODEL="llama3.1:8b" ;; 
-            081) MODEL="gpt-oss:20b" ;; 
+            081) MODEL="gpt-oss:20b" ;;
+            092) MODEL="glm-5.2:cloud" ;; 
             101) MODEL="gemini-2.5-flash-lite" ;;
             102) MODEL="gemini-2.5-flash" ;;
             103) MODEL="gemini-2.5-pro" ;;
@@ -1039,14 +1081,20 @@ bare() {
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
 
-        # --- BUILD BARE_AI.md IN THE bare-ai-workspace WORKING DIRECTORY ---
-        mkdir -p "$HOME/bare-ai-workspace/bare-functional-role"
-        {
-            # 1. Sovereign Identity...
-            ...
-        } > "$HOME/bare-ai-workspace/bare-functional-role/BARE_AI.md"
-        
-        # every invocation keeps the context fresh without bloating the API prompt.
+        # --- BUILD BARE_AI.md IN THE PERSISTENT AGENT WORKSPACE ---
+        # This directory is also where the CLI is launched FROM below — never
+        # from inside bare-ai-cli/ — so this file, the session log (BARE.md),
+        # and any other relative-path output the CLI produces all stay inside
+        # bare-ai-workspace/ and never pollute the git-tracked CLI repo.
+        local ROLE_BRIDGE_DIR="$HOME/bare-ai-workspace/bare-functional-role"
+        mkdir -p "$ROLE_BRIDGE_DIR"
+
+        # Extract the shield marker dynamically from the deployed technical
+        # constitution's first line, so the no-tools fallback below never
+        # drifts out of sync if the marker is ever regenerated.
+        local SHIELD_MARKER
+        SHIELD_MARKER=$(head -1 "$TECH_CONST" | awk '{print $3}')
+
         {
             # 1. Sovereign Identity (only for Tir-Na-AI models)
             if [[ "$MODEL" == tir-na-ai* ]]; then
@@ -1054,22 +1102,22 @@ bare() {
                 echo ""
             fi
 
-            # 2. Primary Role Constitution (MOVED TO TOP TO CURE PRIMACY BIAS)
+            # 2. Primary Role Constitution (kept above the shield marker)
             if [ -f "$ROLE_CONST" ]; then
                 sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST"
                 echo ""
                 echo ""
             fi
 
-            # 3. Technical Constitution & Bridge (NOW AT THE BOTTOM)
+            # 3. Technical Constitution & Bridge (shield marker lives here)
             if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
                 sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST"
             else
-                echo "# 🛡️ THE BARE-AI TECHNICAL DIRECTIVE"
-                echo "***CRITICAL CONTEXT***: You are operating in pure reasoning and chat mode. System tools and workspace execution are currently disabled for this session."
+                echo "# 🛡️ ${SHIELD_MARKER} THE BARE-AI TECHNICAL DIRECTIVE"
+                echo "***CRITICAL CONTEXT***: Everything above the marker \"🛡️ ${SHIELD_MARKER}\" is your Primary Agent Identity. You are currently operating in pure reasoning and chat mode — system tools and workspace execution are disabled for this session."
                 echo ""
             fi
-        } > "$HOME/bare-ai-workspace/bare-functional-role/BARE_AI.md"
+        } > "$ROLE_BRIDGE_DIR/BARE_AI.md"
 
         # Minimal system prompt — the heavy context is now in BARE_AI.md
         export BARE_AI_SYSTEM_PROMPT="You are a Sovereign Bare-AI Agent. Today is $TODAY."
@@ -1102,8 +1150,11 @@ bare() {
             fi
         fi
     
-        # Launch CLI normally (No infinite loops!)
-        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
+        # Launch CLI from the persistent workspace bridge directory — NEVER
+        # from inside bare-ai-cli/ — so session logs (BARE.md), the merged
+        # BARE_AI.md context, or any other relative-path output the CLI
+        # produces never land inside the git-tracked CLI repo.
+        cd "$ROLE_BRIDGE_DIR" && node "$HOME/bare-ai-cli/sovereign.js" "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
@@ -1115,6 +1166,8 @@ bare() {
 
     else
         echo -e "\033[1;33m✨ [Engine: Gemini CLI | Model: $MODEL]\033[0m"
+
+        
         local combined_const=""
         
         # 1. Primary Role Constitution (MOVED TO TOP)
