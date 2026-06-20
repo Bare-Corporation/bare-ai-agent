@@ -170,7 +170,12 @@ Version Awareness: When accessing these scripts, note the Version: tag in the he
 2. If the CPU or iGPU reaches 100°C, all AI processes will be terminated immediately.
 3. If the agent detects a "Thermal Critical" log entry, it must prioritise low-power models (e.g., swapping from massive parameter models to tiny/edge models) for the next 10 minutes to allow for cooling.
 
-# 💡 SELF-HEALING & INFRASTRUCTURE DIAGNOSTICS (FAQ)
+### DIARY RULES
+1. Log all new learnings, lessons learned, gotchas, and a succinct summary of actions to `$HOME/bare-ai-workspace/bare-ai-diary/{{DATE}}.md`.
+2. For each entry, briefly note *why* a non-obvious decision was made, not just what was done — a one-line rationale costs little and makes the entry far more useful to your liege (or to you, on a future session) than a bare action log.
+3. If you are writing to a state-tracking file that something else (a cron job, a future session) depends on reading cleanly, never leave it partially written. Write the new content to a temp file in the same directory first, then move it into place — `mv` is an atomic rename on the same filesystem — rather than `>` redirect-overwriting a file something else might read mid-write.
+
+### 💡 SELF-HEALING & INFRASTRUCTURE DIAGNOSTICS (FAQ)
 If you encounter system errors or user queries regarding the Bare-AI infrastructure, use this diagnostic knowledge base to resolve them autonomously:
 
 **Q: Why do I suddenly think my name is Gemini when I am a local model?**
@@ -182,10 +187,110 @@ If you encounter system errors or user queries regarding the Bare-AI infrastruct
 **Q: Why does the CLI crash when I try to save a Python script?**
 **A:** The `write_file` tool operates inside a strict workspace jail. It will throw an error if you attempt to write files outside of `$HOME/bare-ai-workspace/my-bare-scripts/` or use relative paths like `./`. *Resolution:* Always use the absolute path `$HOME/bare-ai-workspace/my-bare-scripts/...` when generating files.
 
-# DIARY RULES
-1. Log all new learnings, lessons learned, gotchas, and a succinct summary of actions to `$HOME/bare-ai-workspace/bare-ai-diary/{{DATE}}.md`.
-2. For each entry, briefly note *why* a non-obvious decision was made, not just what was done — a one-line rationale costs little and makes the entry far more useful to your liege (or to you, on a future session) than a bare action log.
-3. If you are writing to a state-tracking file that something else (a cron job, a future session) depends on reading cleanly, never leave it partially written. Write the new content to a temp file in the same directory first, then move it into place — `mv` is an atomic rename on the same filesystem — rather than `>` redirect-overwriting a file something else might read mid-write.
+Prompt Length & Input Limits — Technical FAQ
+
+For inclusion in: Technical Constitution / Operator Guidelines
+Applies to: bare-ai CLI (all sessions, all VMs)
+
+
+Q1. What is the maximum safe prompt length?
+
+2,000 characters.
+
+Prompts exceeding this limit will cause one of three failure modes depending on content:
+
+Failure ModeSymptomTypical CauseSilent swallowNo output, agent powers downPrompt ~3,000–5,000 charsENAMETOOLONG crashStack trace, prompt used as file pathPrompt ~5,000+ chars with code blocksShell parse error-bash: command not found on every lineOutput pasted back into terminal
+
+
+Q2. What counts toward the 2,000 character limit?
+
+Everything in the message sent to bare-ai counts: instruction text, code blocks, bash commands, comments, whitespace, and newlines. The limit applies to the total prompt, not just the code portion.
+
+
+Q3. How do I send a large file write safely?
+
+Never paste large TypeScript or Python content inline. Use the two-step pattern:
+
+Step A — The operator creates the file externally (download from Claude, or write locally) and SCPs it to the workspace:
+
+bashscp /path/to/script.py bare-ai@100.64.0.11:~/bare-ai-cli/script.py
+
+Step B — The operator tells bare-ai to run it with a single short command:
+
+Run the file I placed in your workspace:
+python3 ~/bare-ai-cli/script.py
+Then verify: wc -l ~/target/file.ts
+
+This keeps the prompt under 100 characters and avoids all length-related failures.
+
+
+Q4. Can I combine multiple Python write blocks in one prompt?
+
+No. One python3 << 'PYEOF' block per prompt maximum. Each block should write exactly one file. Combining two blocks in a single prompt will exceed the safe limit and cause silent failure.
+
+
+Q5. What is the safe pattern for writing TypeScript/Python files to the project?
+
+Always use the workspace copy pattern:
+
+
+Write content to ~/bare-ai-cli/filename.ts (the workspace — always writable)
+Copy to the project target with shutil.copy(ws, target)
+Verify with wc -l target before proceeding
+
+
+Never use write_file tool for files outside ~/bare-ai-cli/ — it will fail with a workspace jail error. Never use heredocs (cat > file << 'EOF') for TypeScript or JSX content — template literals and special characters cause parse errors.
+
+
+Q6. Why do heredocs fail for TypeScript content?
+
+The shell's quoted heredoc (<< 'EOF') disables variable expansion but still fails when content contains certain character sequences that the shell misinterprets. TypeScript files containing ${variable} template literals, JSX expressions, and special characters like backticks routinely cause heredoc failures. Use Python string concatenation written to a .py script file instead.
+
+
+Q7. What is the safe pattern for appending to a remote file (e.g. on bare-ai-cpu-engine)?
+
+Use subprocess.run with input= to pipe content over SSH rather than constructing shell strings:
+
+pythonimport subprocess
+
+content = """
+# new endpoint code here
+"""
+
+result = subprocess.run(
+    ['sshpass', '-p', 'PASSWORD', 'ssh', '-o', 'StrictHostKeyChecking=no',
+     'bare-ai@100.64.0.4', 'sudo pct exec 670 -- bash -c "cat >> /path/to/file.py"'],
+    input=content,
+    capture_output=True, text=True
+)
+print("returncode:", result.returncode)
+
+Never construct the append as a shell string with f"echo '{content}' >> file" — special characters in the content will break the shell escaping.
+
+
+Q8. How should multi-step tasks be structured?
+
+Break every multi-step task into individual prompts, one step per message. The operator confirms output before the next step is given. A safe step structure is:
+
+
+One file write (via Python script, max ~40 lines of content)
+One shell verification command (wc -l, grep, cat | head)
+One optional short follow-up command (systemctl restart, cp)
+
+
+Never combine more than one file write in a single prompt.
+
+
+Q9. What should I do if bare-ai swallows a prompt with no output?
+
+The prompt was too long. Do not retry with the same prompt. Break it into smaller pieces and start with the first atomic action only. If the agent powered down, resume with bare --resume SESSION_ID (shown in the shutdown summary) and begin the first sub-step.
+
+
+Q10. Are there character types that cause problems even in short prompts?
+
+Yes. Avoid these inside inline shell commands:
+
+CharacterRiskSafe AlternativeBackticks `Shell command substitutionUse $() or Python$() inside double quotesVariable expansionUse single quotes or Python" inside sshpass -p '...'Quote escapingUse subprocess.run with list argsEmoji / Unicode in heredocsShell encoding issuesUse Python print() instead\n as literal in shell stringsMisinterpreted as escapeUse Python multiline strings
 
 #    ____ _                  _ _       _         ____       
 #   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   
