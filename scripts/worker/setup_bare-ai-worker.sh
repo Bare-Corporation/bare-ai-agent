@@ -12,10 +12,10 @@
 # ==============================================================================
 # SCRIPT NAME:    setup_bare-ai-worker.sh
 # DESCRIPTION:    bare-ai-worker Installer (Level 4 Autonomy)
-# AUTHOR:         Cian Egan
-# DATE:           2026-06-17
-# VERSION:        5.6.0 (Debian, Proxmox, Mint, Debian 12 on AWS/Root)
-# CHANGELOG:      Added persistent bare-ai-workspace separation — the agent
+# AUTHOR:         Bare-AI
+# DATE:           2026-06-21
+# VERSION:        5.6.1 (Debian, Proxmox, Mint, Debian 12 on AWS/Root)
+# CHANGELOG:      Added persistent bare-necessities-workspace separation — the agent
 #                 now NEVER writes inside the git-tracked bare-ai-cli repo.
 # ==============================================================================
 
@@ -77,7 +77,7 @@ CLI_REPO_DIR="$TARGET_HOME/bare-ai-cli"
 # users never need to run 'git stash'. This directory and its contents are
 # NEVER deleted by this installer, on fresh install or on update — every
 # operation against it below uses 'mkdir -p', which is purely additive.
-BARE_AI_WORKSPACE_DIR="$TARGET_HOME/bare-ai-workspace"
+BARE_AI_WORKSPACE_DIR="$TARGET_HOME/bare-necessities-workspace"
 AGENT_SCRIPTS_DIR="$BARE_AI_WORKSPACE_DIR/my-bare-scripts"     # agent-authored, never overwritten by this installer
 CLI_SCRIPTS_DIR="$BARE_AI_WORKSPACE_DIR/scripts"               # official toolkit, refreshed on every install/update
 ROLE_BRIDGE_DIR="$BARE_AI_WORKSPACE_DIR/bare-functional-role"  # merged role+constitution context, rewritten fresh each session
@@ -167,7 +167,7 @@ echo -e "${GREEN}✓ Directory structure created${NC}"
 
 # --- 1a. AGENT WORKSPACE SETUP (Persistent — survives updates & reinstalls) ---
 echo -e "${YELLOW}Creating persistent agent workspace (separate from bare-ai-cli)...${NC}"
-execute_command "mkdir -p \"$AGENT_SCRIPTS_DIR/bare-bash-scripts\" \"$AGENT_SCRIPTS_DIR/bare-python3-scripts\" \"$CLI_SCRIPTS_DIR\" \"$ROLE_BRIDGE_DIR\"" "Create bare-ai-workspace directory structure"
+execute_command "mkdir -p \"$AGENT_SCRIPTS_DIR/bare-bash-scripts\" \"$AGENT_SCRIPTS_DIR/bare-python3-scripts\" \"$CLI_SCRIPTS_DIR\" \"$ROLE_BRIDGE_DIR\"" "Create bare-necessities-workspace directory structure"
 echo -e "${GREEN}✓ Agent workspace ready at $BARE_AI_WORKSPACE_DIR (never wiped by this installer)${NC}"
 
 #####################################################
@@ -463,6 +463,11 @@ EOF
     #Grok Models
     vault kv put secret/grok-4-1-fast-reasoning/config base_url="https://api.x.ai/v1" model_name="grok-4-1-fast-reasoning" api_key="enterYourKey" > /dev/null
     vault kv put secret/grok-3/config base_url="https://api.x.ai/v1" model_name="grok-3" api_key="enterYourKey" > /dev/null
+
+    #Bare AI Models
+
+    # Bare-AI Council API (purchase key at https://bare-ai.net)
+    vault kv put secret/bare-ai-council/config base_url="https://api.bare-ai.net/v1/council" api_key="enterYourKey" > /dev/null
     
     # 10. Extract IDs for the Agent
 
@@ -595,7 +600,7 @@ if [ "$FAST_UPDATE" = false ]; then
             # Safety net: if the agent (or a past bug) ever wrote files directly
             # into the git-tracked CLI repo, auto-stash them so 'git pull' never
             # blocks an update and the user never has to run 'git stash' by hand.
-            # Going forward the agent only ever writes inside bare-ai-workspace/.
+            # Going forward the agent only ever writes inside bare-necessities-workspace/.
             execute_command "cd \"$CLI_REPO_DIR\" && if [ -n \"\$(git status --porcelain)\" ]; then git stash --include-untracked; fi" "Auto-stash any stray changes in CLI repo before update"
             execute_command "cd \"$CLI_REPO_DIR\" && git pull origin main" "Update Bare-AI-CLI"
         fi
@@ -637,7 +642,7 @@ fi
 
 # --- 3. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
 # CLI_SCRIPTS_DIR (official, installer-managed toolkit) lives inside
-# bare-ai-workspace/ — see "AGENT WORKSPACE" definitions near the top.
+# bare-necessities-workspace/ — see "AGENT WORKSPACE" definitions near the top.
 echo -e "${YELLOW}Deploying bare-necessities toolset to persistent agent workspace...${NC}"
 
 if [ -d "$BARE_NECESSITIES_DIR" ]; then
@@ -666,6 +671,7 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor.py" "Symlink ai-monitor.py"
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map.py" "Symlink code-map.py"
     execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json.py" "Symlink pve-json.py"
+    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-council.py\" /usr/local/bin/council.py" "Symlink council.py"
 
     echo -e "${GREEN}✓ bare-necessities deployed and jailed successfully${NC}"
 else
@@ -822,7 +828,7 @@ This directory stores the persistent configuration and memory for the BARE-AI ag
 - **config/agent.env** — Agent config (AGENT_ID, ENGINE_TYPE)
 - **config/vault.env** — Vault credentials 
 
-## The Agent Workspace (sibling directory: ~/bare-ai-workspace/)
+## The Agent Workspace (sibling directory: ~/bare-necessities-workspace/)
 This is where the agent actually lives and works day to day. It is kept
 completely separate from the git-tracked ~/bare-ai-cli/ repository so that
 'git pull' / 'bare-update' never conflicts with anything the agent has
@@ -882,7 +888,7 @@ bare() {
     local TODAY=$(date +%Y-%m-%d)
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
-    local DIARY="$HOME/bare-ai-workspace/bare-ai-diary/$TODAY.md"
+    local DIARY="$HOME/bare-necessities-workspace/bare-ai-diary/$TODAY.md"
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
 
