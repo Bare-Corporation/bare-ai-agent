@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+#############################################################
+#    ____ _                  _ _       _         ____       #
+#   / ___| | ___  _   _  ___| (_)_ __ | |_      / ___|___   #
+#  | |   | |/ _ \| | | |/ __| | | '_ \| __|     | |   / _ \ #
+#  | |___| | (_) | |_| | (__| | | | | | |_      | |__| (_) |#
+#   \____|_|\___/ \__,_|\___|_|_|_| |_|\__|      \____\___/ #
+#                                                           #
+#  Bare-ai-council API Client                               #
+#  AI Model & VRAM/RAM Pressure Monitor                     #
+#  Version: version: v0.0.1 | Updated: 2026-06-22           #
+#############################################################
+#  by the Cloud Integration Corporation                     #
+#############################################################
+
 """
 version: v0.0.1
 bare-ai-council.py — Bare-AI Council API client
@@ -25,6 +39,11 @@ Exit codes:
   0 — Council reached agreement
   1 — Error (API, timeout, etc.)
   2 — Council did NOT reach agreement (result still printed)
+
+
+Notes:
+
+524 exits silently as this is a cloudflare timeout during the polling phase— the poll loop catches it and the spinner just keeps going as if nothing happened. Real errors (403, 404, 500) still print a proper http error code message.
 
 Environment (optional overrides — Vault is the primary source):
   BARE_COUNCIL_API_KEY  — Override the API key (skips Vault lookup entirely)
@@ -198,7 +217,7 @@ def resolve_council_config() -> tuple[str, str]:
 
 def api_request(url: str, api_key: str, payload: dict | None = None) -> dict:
     """Single JSON API call. POST if payload given, GET otherwise."""
-    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    headers = {"X-API-Key": api_key, "User-Agent": "bare-ai-council-agent/1.0", "Content-Type": "application/json"}
     data    = json.dumps(payload).encode() if payload else None
     method  = "POST" if data else "GET"
     req     = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -206,13 +225,14 @@ def api_request(url: str, api_key: str, payload: dict | None = None) -> dict:
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
+        if e.code == 524:
+            sys.exit(1)  # Cloudflare transient timeout — handled silently by poll loop
         body = e.read().decode(errors="replace")
         print(f"[council] HTTP {e.code} from {url}: {body}", file=sys.stderr)
         sys.exit(1)
     except urllib.error.URLError as e:
         print(f"[council] Connection error: {e.reason}", file=sys.stderr)
         sys.exit(1)
-
 
 def build_yaml(task: str, models: list, roles: list, rounds: int) -> str:
     agents = ""
@@ -237,25 +257,35 @@ stages:
     team:
 {agents}"""
 
-
 def poll_until_complete(base_url: str, job_id: str, api_key: str,
                         timeout: int, poll_interval: int) -> dict:
-    deadline = time.time() + timeout
-    spinner  = ["|", "/", "─", "\\"]
-    tick     = 0
+    deadline    = time.time() + timeout
+    spinner     = ["|", "/", "─", "\\"]
+    tick        = 0
+    last_tokens = 0
+    state       = "queued"
+
     while time.time() < deadline:
-        status = api_request(f"{base_url}/status/{job_id}", api_key)
-        state  = status.get("status", "unknown")
-        if state == "complete":
-            return status
-        if state in ("failed", "error"):
-            print(f"\n[council] Job {job_id} failed: {status}", file=sys.stderr)
-            sys.exit(1)
+        try:
+            status = api_request(f"{base_url}/status/{job_id}", api_key)
+        except SystemExit:
+            # api_request exited — likely a 524 Cloudflare timeout on the
+            # status endpoint. Treat as transient and keep polling.
+            pass
+        else:
+            # Only reached if api_request succeeded (no exception)
+            state       = status.get("status", "unknown")
+            last_tokens = status.get("tokens_total", 0)
+            if state == "complete":
+                return status
+            if state in ("failed", "error"):
+                print(f"\n[council] Job {job_id} failed: {status}", file=sys.stderr)
+                sys.exit(1)
+
         elapsed = int(time.time() - (deadline - timeout))
-        tokens  = status.get("tokens_total", 0)
         print(
             f"\r  {spinner[tick % 4]}  [{state}] "
-            f"{elapsed}s elapsed · {tokens} tokens so far",
+            f"{elapsed}s elapsed · {last_tokens} tokens so far",
             end="", flush=True
         )
         tick += 1
