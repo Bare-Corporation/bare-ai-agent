@@ -60,7 +60,6 @@ echo -e "${YELLOW}5. Wiping workspaces and hidden engine caches...${NC}"
 cd ~
 rm -rf ~/bare-ai-agent 
 rm -rf ~/bare-ai-cli 
-rm -rf ~/bare-ai-workspace
 rm -rf ~/.bare-ai 
 rm -rf ~/.config/bare-ai
 
