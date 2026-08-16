@@ -395,6 +395,7 @@ EOF
     vault kv put secret/qwen3.5:0.8b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:0.8b" api_key="local" > /dev/null
     vault kv put secret/qwen3.5:4b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:4b" api_key="local" > /dev/null
     vault kv put secret/qwen3.6:27b/config base_url="http://127.0.0.1:11434" model_name="qwen3.6:27b" api_key="local" > /dev/null
+    vault kv put secret/qwen3.8:27b/config base_url="http://127.0.0.1:11434" model_name="qwen3.8:27b" api_key="local" > /dev/null
 
     # Gemma Models 04x
     vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
@@ -921,7 +922,8 @@ bare() {
         echo -e "   023) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
         echo -e "   030) Qwen 3.5 (0.8B)         [qwen3.5:0.8b]"
         echo -e "   031) Qwen 3.5 (4B)           [qwen3.5:4b]"
-        echo -e "   032) Qwen 3.6 (27B)          [qwen3.6:27b]" 
+        echo -e "   032) Qwen 3.6 (27B)          [qwen3.6:27b]"
+        echo -e "   033) Qwen 3.8 (27B)          [qwen3.8:27b]"  
         echo -e "   041) Gemma 4 (E4B Edge)      [gemma4:e4b]"
         echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
         echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
@@ -994,7 +996,8 @@ bare() {
             023) MODEL="qwen2.5-coder:32b" ;;
             030) MODEL="qwen3.5:0.8b" ;;
             031) MODEL="qwen3.5:4b" ;;
-            032) MODEL="qwen3.6:27b" ;; 
+            032) MODEL="qwen3.6:27b" ;;
+            033) MODEL="qwen3.8:27b" ;;  
             041) MODEL="gemma4:e4b" ;;
             042) MODEL="gemma4:26b" ;;
             043) MODEL="gemma4:31b" ;;
