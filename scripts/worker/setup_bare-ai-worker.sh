@@ -372,103 +372,28 @@ EOF
   # 9. Seed Default Models
     echo -e "${YELLOW}Seeding default model endpoints...${NC}"
 
-    ### The current design is loose but follows a certain logic:
-    ## xx0 = Tiny (e.g., 2B, 4B etc)
-    ## xx1 = Small (e.g., 4B, 6N, 8B
-    ## xx2 = Medium / Pro (e.g., 12B 14B, )
-    ## xx3 = Heavy / Ultra (e.g., 20B)
-    
-    # 9a LOCAL HOSTED Defaults
+    # ── Model routing is now catalog-driven ──────────────
+    # The Council API /v1/models is the single source of truth for
+    # model routing (cloud + local). The installer no longer pre-seeds
+    # every model config. Local Ollama models resolve keyless from the
+    # catalog (no Vault entry needed). Cloud models: users add their own
+    # provider keys on demand. Only the Council key is pre-seeded here so
+    # new users get the "one key to rule them all" onboarding.
 
-    # Tir-na-ai Models 00x
-    vault kv put secret/tir-na-ai:igpu/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai:igpu" api_key="local" > /dev/null
-    vault kv put secret/tir-na-ai-fast/config base_url="http://127.0.0.1:11434" model_name="tir-na-ai-fast:latest" api_key="local" > /dev/null
-    
-    # Deepseek Models 01x
-    vault kv put secret/deepseek-r1:8b/config base_url="http://127.0.0.1:11434" model_name="deepseek-r1:8b" api_key="local" > /dev/null
-   
-    
-    # Qwen Models 02x and 03x
-    vault kv put secret/qwen2.5-coder:7b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:7b" api_key="local" > /dev/null
-    vault kv put secret/qwen2.5-coder:14b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:14b" api_key="local" > /dev/null
-    vault kv put secret/qwen2.5-coder:32b/config base_url="http://127.0.0.1:11434" model_name="qwen2.5-coder:32b" api_key="local" > /dev/null
-    vault kv put secret/qwen3.5:0.8b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:0.8b" api_key="local" > /dev/null
-    vault kv put secret/qwen3.5:4b/config base_url="http://127.0.0.1:11434" model_name="qwen3.5:4b" api_key="local" > /dev/null
-    vault kv put secret/qwen3.6:27b/config base_url="http://127.0.0.1:11434" model_name="qwen3.6:27b" api_key="local" > /dev/null
-    vault kv put secret/qwen3.8:27b/config base_url="http://127.0.0.1:11434" model_name="qwen3.8:27b" api_key="local" > /dev/null
-
-    # Gemma Models 04x
-    vault kv put secret/gemma4:e4b/config base_url="http://127.0.0.1:11434" model_name="gemma4:e4b" api_key="local" > /dev/null
-    vault kv put secret/gemma4:26b/config base_url="http://127.0.0.1:11434" model_name="gemma4:26b" api_key="local" > /dev/null
-    vault kv put secret/gemma4:31b/config base_url="http://127.0.0.1:11434" model_name="gemma4:31b" api_key="local" > /dev/null
-
-    #Mistral Models 05x
-    vault kv put secret/mistral-nemo:latest/config base_url="http://127.0.0.1:11434" model_name="mistral-nemo:latest" api_key="local" > /dev/null
-    vault kv put secret/mistral-nemo:latest/config base_url="http://127.0.0.1:11434" model_name="codestral:22b" api_key="local" > /dev/null
-
-    #IBM Models 06x
-    vault kv put secret/granite4:tiny-h/config base_url="http://127.0.0.1:11434" model_name="granite4:tiny-h" api_key="local" > /dev/null
-
-    #Meta Models 07x
-    vault kv put secret/llama3.1:8b/config base_url="http://127.0.0.1:11434" model_name="llama3.1:8b" api_key="local" > /dev/null
-
-    #Open AI
-    vault kv put secret/gpt-oss:20b/config base_url="http://127.0.0.1:11434" model_name="gpt-oss:20b" api_key="local" > /dev/null
-
-     #Z.AI
-    vault kv put secret/glm-5.2:cloud/config base_url="http://127.0.0.1:11434" model_name="glm-5.2:cloud" api_key="local" > /dev/null
-  
-    #9b  PREMIUM CLOUD Defaults
-
-    #  Gemini Models
-
-    vault kv put secret/gemini-2.5-flash-lite/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash-lite" api_key="enterYourKey" > /dev/null
-    vault kv put secret/gemini-2.5-flash/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-flash" api_key="enterYourKey" > /dev/null
-    vault kv put secret/gemini-2.5-pro/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-2.5-pro" api_key="enterYourKey" > /dev/null
-    vault kv put secret/gemini-3-flash-preview/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-3-flash-preview" api_key="enterYourKey" > /dev/null
-    vault kv put secret/gemini-3.1-pro-preview/config base_url="https://generativelanguage.googleapis.com/v1beta/openai" model_name="gemini-3.1-pro-preview" api_key="enterYourKey" > /dev/null
-
-     #  GPT Models
-    vault kv put secret/gpt-4o/config base_url="https://api.openai.com/v1" model_name="gpt-4o" api_key="enterYourKey" > /dev/null
-    vault kv put secret/gpt-4-turbo/config base_url="https://api.openai.com/v1" model_name="gpt-4-turbo" api_key="enterYourKey" > /dev/null
-    vault kv put secret/o1-preview/config base_url="https://api.openai.com/v1" model_name="o1-preview" api_key="enterYourKey" > /dev/null
-    vault kv put secret/gpt-5.5/config base_url="https://api.openai.com/v1" model_name="gpt-5.5" api_key="enterYourKey" > /dev/null
-
-     #  Claude Models
-    vault kv put secret/claude-haiku-4-5-20251001/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-haiku-4-5-20251001" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-sonnet-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-sonnet-4-6" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-opus-4-6/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-6" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-opus-4-7/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-7" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-opus-4-8/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-opus-4-8" api_key="enterYourKey" > /dev/null
-    vault kv put secret/claude-fable-5/config base_url="https://api.anthropic.com/v1/chat/completions" model_name="claude-fable-5" api_key="enterYourKey" > /dev/null
-
-    # Deepseek Models
-    vault kv put secret/deepseek-chat/config base_url="https://api.deepseek.com/v1" model_name="deepseek-chat" api_key="enterYourKey" > /dev/null
-    vault kv put secret/deepseek-reasoner/config base_url="https://api.deepseek.com/v1" model_name="deepseek-reasoner" api_key="enterYourKey" > /dev/null
-    vault kv put secret/deepseek-v4-flash/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-flash" api_key="enterYourKey" > /dev/null
-    vault kv put secret/deepseek-v4-pro/config base_url="https://api.deepseek.com/v1" model_name="deepseek-v4-pro" api_key="enterYourKey" > /dev/null
-
-    # Qwen Models
-    vault kv put secret/qwen-plus/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-plus" api_key="enterYourKey" > /dev/null
-    vault kv put secret/qwen-max/config base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" model_name="qwen-max" api_key="enterYourKey" > /dev/null
-   
-    #Kimi Models
-    vault kv put secret/moonshot-v1-32k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-32k" api_key="enterYourKey" > /dev/null
-    vault kv put secret/moonshot-v1-200k/config base_url="https://api.moonshot.cn/v1" model_name="moonshot-v1-200k" api_key="enterYourKey" > /dev/null
-    vault kv put secret/kimi-k5/config base_url="https://api.moonshot.cn/v1" model_name="kimi-k5" api_key="enterYourKey" > /dev/null
-
-    #Mistral Models
-    vault kv put secret/mistral-large-latest/config base_url="https://api.mistral.ai/v1" model_name="mistral-large-latest" api_key="enterYourKey" > /dev/null
-    vault kv put secret/codestral-latest/config base_url="https://api.mistral.ai/v1" model_name="codestral-latest" api_key="enterYourKey" > /dev/null
-    
-    #Grok Models
-    vault kv put secret/grok-4-1-fast-reasoning/config base_url="https://api.x.ai/v1" model_name="grok-4-1-fast-reasoning" api_key="enterYourKey" > /dev/null
-    vault kv put secret/grok-3/config base_url="https://api.x.ai/v1" model_name="grok-3" api_key="enterYourKey" > /dev/null
-
-    #Bare AI Models
-
-    # Bare-AI Council API (purchase key at https://bare-ai.net)
-    vault kv put secret/bare-ai-council/config base_url="https://api.bare-ai.net/v1/council" api_key="enterYourKey" > /dev/null
+    # Bare-AI Council API — purchase key at https://bare-ai.net
+    # Seed BOTH council paths with the same key:
+    #   - bare-ai-council     : used by bare-ai-council.py (works today)
+    #   - bare-ai-council-v1  : catalog model_id for the future /model 777 adapter
+    # TODO: once the council adapter ships, reconcile council.py to the
+    #       -v1 path and drop the legacy entry.
+    vault kv put secret/bare-ai-council/config \
+        base_url="https://api.bare-ai.net/v1/council" \
+        model_name="bare-ai-council" \
+        api_key="enterYourKey" > /dev/null
+    vault kv put secret/bare-ai-council-v1/config \
+        base_url="https://api.bare-ai.net/v1/council" \
+        model_name="bare-ai-council-v1" \
+        api_key="enterYourKey" > /dev/null
     
     # 10. Extract IDs for the Agent
 
@@ -650,6 +575,16 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     # 2. Sync toolkit to the jail
     echo -e "${YELLOW}Syncing toolkit to $CLI_SCRIPTS_DIR...${NC}"
     execute_command "cp -r \"$BARE_NECESSITIES_DIR/\"* \"$CLI_SCRIPTS_DIR/\"" "Copy tools into jail"
+    # Deploy the model-catalog helper to a stable runtime path so the
+    # bare() shell function can source it (catalog-driven model resolution).
+    mkdir -p "$WORKSPACE_DIR/lib"
+    if [ -f "$REPO_DIR/scripts/worker/lib/catalog.sh" ]; then
+        cp "$REPO_DIR/scripts/worker/lib/catalog.sh" "$WORKSPACE_DIR/lib/catalog.sh"
+        chmod +x "$WORKSPACE_DIR/lib/catalog.sh"
+        echo -e "${GREEN}✓ Model catalog helper deployed to $WORKSPACE_DIR/lib/catalog.sh${NC}"
+    else
+        echo -e "${YELLOW}⚠ catalog.sh not found in repo; menu will use fallback${NC}"
+    fi
 
 
     echo -e "${YELLOW}Sanitising line endings and setting executable permissions in jail...${NC}"
@@ -908,139 +843,25 @@ bare() {
         echo -e "\n\033[1;36m=====================================================\033[0m"
         echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
         echo -e "\033[1;36m=====================================================\033[0m"
-        echo -e "\033[1;33m[The Edge - iGPU Accelerated]\033[0m"
-        echo -e "   000) Tir-Na-AI iGPU          [tir-na-ai:iGPU]"
-
-        echo -e "\033[1;33m[The Thinkers - Reasoning & Chat]\033[0m"
-        echo -e "   001) Tir-Na-AI (8B)          [tir-na-ai:latest]"
-        echo -e "   011) DeepSeek R1 (8B)        [deepseek-r1:8b]"
-        echo -e "   012) DeepSeek Coder V2       [deepseek-coder-v2:latest]"
-
-        echo -e "\033[1;33m[The Doers - Tool Execution & Code]\033[0m"      
-        echo -e "   021) Qwen 2.5 Coder (7B)     [qwen2.5-coder:7b]"
-        echo -e "   022) Qwen 2.5 Coder (14B)    [qwen2.5-coder:14b]"
-        echo -e "   023) Qwen 2.5 Coder (32B)    [qwen2.5-coder:32b]"
-        echo -e "   030) Qwen 3.5 (0.8B)         [qwen3.5:0.8b]"
-        echo -e "   031) Qwen 3.5 (4B)           [qwen3.5:4b]"
-        echo -e "   032) Qwen 3.6 (27B)          [qwen3.6:27b]"
-        echo -e "   033) Qwen 3.8 (27B)          [qwen3.8:27b]"  
-        echo -e "   041) Gemma 4 (E4B Edge)      [gemma4:e4b]"
-        echo -e "   042) Gemma 4 (26B MOE)       [gemma4:26b]"
-        echo -e "   043) Gemma 4 (31B Heavy)     [gemma4:31b]"
-        echo -e "   051) mistral-nemo (7B)       [mistral-nemo:latest]"
-        echo -e "   052) codestral (22B)         [codestral:22b]"
-        echo -e "   061) Granite 4 (Tiny)        [granite4:tiny-h]"
-        echo -e "   071) llama3.1 (8B)           [llama3.1:8b]"
-        echo -e "   081) gpt-oss-20b             [gpt-oss:20b]"
-        echo -e "   092) glm-5.2:cloud           [glm-5.2:cloud]"
-
-        echo -e "-----------------------------------------------------"
-
-        echo -e "\n\033[1;35m=====================================================\033[0m"
-        echo -e "\033[1;35m⭐🤖 101-999 - BARE-AI PREMIUM Engine Selection\033[0m"
-        echo -e "\033[1;35m=====================================================\033[0m"
-        echo -e " \033[1;33m[The Gemini Constellation]\033[0m"
-        echo -e "   101) Gemini 2.5 Flash Lite  [gemini-2.5-flash-lite]"
-        echo -e "   102) Gemini 2.5 Flash       [gemini-2.5-flash]"
-        echo -e "   103) Gemini 2.5 Pro         [gemini-2.5-pro]"
-        echo -e "   104) Gemini 3 Flash (Pre)   [gemini-3-flash-preview]"
-        echo -e "   105) Gemini 3.1 Pro (Pre)   [gemini-3.1-pro-preview]"
-
-        echo -e " \033[1;33m[The GPT Nexus]\033[0m"
-        echo -e "   151) GPT-4o (Omni)          [gpt-4o]"
-        echo -e "   152) GPT-4-Turbo            [gpt-4-turbo]"
-        echo -e "   153) o1-preview (Reasoning) [o1-preview]"
-        echo -e "   155) gpt-5.5                [gpt-5.5]"
-
-        echo -e " \033[1;33m[The Claude Collection]\033[0m"
-        echo -e "   225) Claude-haiku-4-5       [claude-haiku-4-5-20251001]"
-        echo -e "   236) Claude-sonnet-4-6      [claude-sonnet-4-6]"
-        echo -e "   246) Claude-opus-4-6        [claude-opus-4-6]"
-        echo -e "   247) Claude-opus-4-7        [claude-opus-4-7]"
-        echo -e "   248) Claude-opus-4-8        [claude-opus-4-8]"
-        echo -e "   250) Claude-fable-5         [claude-fable-5]"
-
-        echo -e " \033[1;33m[The Depths of Deepseek]\033[0m"
-        echo -e "   301) deepseek-chat          [deepseek-chat]"
-        echo -e "   302) deepseek-reasoner      [deepseek-reasoner]"
-        echo -e "   303) deepseek-v4-flash      [deepseek-v4-flash]"
-        echo -e "   304) deepseek-v4-pro        [deepseek-v4-pro]"
-
-        echo -e " \033[1;33m[The Qwen Stuffani Store]\033[0m"
-        echo -e "   351) Qwen-plus)             [qwen-plus]"
-        echo -e "   352) Qwen-max               [qwen-max]"
-
-        echo -e " \033[1;33m[The Kimi Corral]\033[0m"
-        echo -e "   401) Moonshot-v1-32k        [moonshot-v1-32k]"
-        echo -e "   402) Moonshot-v1-200k       [moonshot-v1-200k]"
-        echo -e "   403) Kimi-k5)               [kimi-k5]"
-
-        echo -e " \033[1;33m[The Mistral Moet]\033[0m"
-        echo -e "   501) Codestral-latest       [codestral-latest]"
-        echo -e "   502) Mistral-large-latest   [mistral-large-latest]"
-
-        echo -e " \033[1;33m[The Grok Fire]\033[0m"
-        echo -e "   665) Grok-4-1 (Fast)        [grok-4-1-fast-reasoning]"
-        echo -e "   666) Grok-3                 [grok-3]"
-        echo -e "-----------------------------------------------------"
-        echo -e " \033[1;36m💡 Tip: You can hot-swap engines mid-session by typing '/model ###', where ### is a valid model #\033[0m"
-
-                read -rp "Select a model code [000-999]: " menu_choice
-        case "$menu_choice" in
-            000) MODEL="tir-na-ai:iGPU" ;;
-            001) MODEL="tir-na-ai:latest" ;;
-            011) MODEL="deepseek-r1:8b" ;;
-            012) MODEL="deepseek-coder-v2:latest" ;;
-            021) MODEL="qwen2.5-coder:7b" ;;
-            022) MODEL="qwen2.5-coder:14b" ;;
-            023) MODEL="qwen2.5-coder:32b" ;;
-            030) MODEL="qwen3.5:0.8b" ;;
-            031) MODEL="qwen3.5:4b" ;;
-            032) MODEL="qwen3.6:27b" ;;
-            033) MODEL="qwen3.8:27b" ;;  
-            041) MODEL="gemma4:e4b" ;;
-            042) MODEL="gemma4:26b" ;;
-            043) MODEL="gemma4:31b" ;;
-            051) MODEL="mistral-nemo:latest" ;;
-            052) MODEL="codestral:22b" ;;
-            061) MODEL="granite4:tiny-h" ;;
-            071) MODEL="llama3.1:8b" ;; 
-            081) MODEL="gpt-oss:20b" ;;
-            092) MODEL="glm-5.2:cloud" ;; 
-            101) MODEL="gemini-2.5-flash-lite" ;;
-            102) MODEL="gemini-2.5-flash" ;;
-            103) MODEL="gemini-2.5-pro" ;;
-            104) MODEL="gemini-3-flash-preview" ;;
-            105) MODEL="gemini-3.1-pro-preview" ;;
-            151) MODEL="gpt-4o" ;;
-            152) MODEL="gpt-4-turbo" ;;
-            153) MODEL="o1-preview" ;;
-            155) MODEL="gpt-5.5" ;;
-            225) MODEL="claude-haiku-4-5-20251001" ;;
-            236) MODEL="claude-sonnet-4-6" ;;
-            246) MODEL="claude-opus-4-6" ;;
-            247) MODEL="claude-opus-4-7" ;;
-            248) MODEL="claude-opus-4-8" ;;
-            250) MODEL="claude-fable-5" ;;
-            301) MODEL="deepseek-chat" ;;
-            302) MODEL="deepseek-reasoner" ;;
-            303) MODEL="deepseek-v4-flash" ;;
-            304) MODEL="deepseek-v4-pro" ;;
-            351) MODEL="qwen-plus" ;;
-            352) MODEL="qwen-max" ;;
-            401) MODEL="moonshot-v1-32k" ;;
-            402) MODEL="moonshot-v1-200k" ;;
-            403) MODEL="kimi-k5" ;;
-            451) MODEL="451Reserved" ;;
-            452) MODEL="452Reserved" ;;
-            453) MODEL="453Reserved" ;;
-            501) MODEL="codestral-latest" ;;
-            502) MODEL="mistral-large-latest" ;;
-            665) MODEL="grok-4-1-fast-reasoning" ;;
-            666) MODEL="grok-3" ;;
-            
-            *) echo -e "\033[0;31mInvalid code. Aborting.\033[0m"; return 1 ;;
-        esac
+        # ── Catalog-driven menu (single source of truth) ──
+        if [ -f "$HOME/.bare-ai/lib/catalog.sh" ]; then
+            source "$HOME/.bare-ai/lib/catalog.sh"
+            catalog_render_menu
+        else
+            echo "   (model catalog helper missing; run the installer to restore)"
+        fi
+        read -rp "Select a model code [000-999]: " menu_choice
+            # ── Catalog-driven dispatch: resolve shortcut -> model + capability ──
+    if ! command -v catalog_resolve >/dev/null 2>&1; then
+        [ -f "$HOME/.bare-ai/lib/catalog.sh" ] && source "$HOME/.bare-ai/lib/catalog.sh"
+    fi
+    _resolved="$(catalog_resolve "$menu_choice")"
+    if [ -z "$_resolved" ]; then
+        echo "Invalid code. Aborting."
+        return 1
+    fi
+    MODEL="$(printf '%s' "$_resolved" | cut -d'|' -f1)"
+    _tool_cap="$(printf '%s' "$_resolved" | cut -d'|' -f2)"
         echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
 
         else
@@ -1069,15 +890,12 @@ bare() {
     export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
 
 
-    # Dynamic Tool Capability Mapping
-    case "$MODEL" in
-        tir-na-ai:*|deepseek-r1*|deepseek-coder*|deepseek-reasoner|gemma4:*|o1-preview) 
-            export BARE_AI_NO_TOOLS="true" 
-            ;;
-        *) 
-            export BARE_AI_NO_TOOLS="false" 
-            ;;
-    esac
+        # ── Tool capability from catalog (thinker -> tools off) ──
+    if [ "$_tool_cap" = "thinker" ]; then
+        export BARE_AI_NO_TOOLS="true"
+    else
+        export BARE_AI_NO_TOOLS="false"
+    fi
 
     # --- CIC SOVEREIGN AUTONOMY OVERRIDES ---
     export BARE_AI_DISABLE_WORKSPACE_TRUST="true"
