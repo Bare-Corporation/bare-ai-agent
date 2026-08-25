@@ -614,6 +614,28 @@ else
     echo -e "${YELLOW}⚠️ bare-necessities source not found at $BARE_NECESSITIES_DIR. Skipping toolkit deployment.${NC}"
 fi
 
+# --- 3b. TODO SYSTEM DEPLOYMENT (persistent standalone folder) ---
+# The todo system is a self-contained folder (manager script + stage CSVs).
+# It is delivered to its own location in the agent workspace so its data
+# persists across installs/updates (never clobbered by the toolkit sync above).
+TODO_SRC_DIR="$BARE_NECESSITIES_DIR/todo"
+TODO_DEST_DIR="$BARE_AI_WORKSPACE_DIR/todo"
+if [ -d "$TODO_SRC_DIR" ]; then
+    echo -e "${YELLOW}Deploying todo system to $TODO_DEST_DIR...${NC}"
+    mkdir -p "$TODO_DEST_DIR"
+    cp -f "$TODO_SRC_DIR/todo.py" "$TODO_DEST_DIR/todo.py" 2>/dev/null || true
+    [ -f "$TODO_SRC_DIR/README.md" ] && cp -f "$TODO_SRC_DIR/README.md" "$TODO_DEST_DIR/README.md" 2>/dev/null || true
+    [ -f "$TODO_SRC_DIR/.gitignore" ] && cp -f "$TODO_SRC_DIR/.gitignore" "$TODO_DEST_DIR/.gitignore" 2>/dev/null || true
+    chmod +x "$TODO_DEST_DIR/todo.py"
+    for stage in not_started in_progress issue on_hold completed withdrawn; do
+        [ -f "$TODO_DEST_DIR/$stage.csv" ] || cp -f "$TODO_SRC_DIR/$stage.csv" "$TODO_DEST_DIR/$stage.csv"
+    done
+    sudo ln -sf "$TODO_DEST_DIR/todo.py" /usr/local/bin/todo
+    echo -e "${GREEN}✓ todo system deployed at $TODO_DEST_DIR${NC}"
+else
+    echo -e "${YELLOW}⚠️ todo source not found at $TODO_SRC_DIR. Skipping todo deployment.${NC}"
+fi
+
 #####################################################
 #####################################################
 #####################################################
