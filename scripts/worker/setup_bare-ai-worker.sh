@@ -52,11 +52,6 @@ fi
 
 echo -e "${GREEN}Starting BARE-AI setup...${NC}"
 
-# --- ENGINE SELECTION ---
-echo -e "\nSelect your AI Engine:"
-echo "1) Bare-AI-CLI (Sovereign, Local-First, Vault-Integrated)"
-echo "2) Gemini-CLI (Standard Google Cloud SDK)"
-read -rp "Enter choice [1 or 2]: " ENGINE_CHOICE
 
 # --- REAL USER DETECTION (SUDO TRAP FIX) ---
 TARGET_USER="${SUDO_USER:-$USER}"
@@ -135,11 +130,7 @@ CONFIG_FILE="$CONFIG_DIR/agent.env"
 # ii. Safely create the directory structure first
 mkdir -p "$CONFIG_DIR"
 
-if [ "$ENGINE_CHOICE" == "1" ]; then
-    ENGINE_TYPE="sovereign"
-else
-    ENGINE_TYPE="gemini"
-fi
+ENGINE_TYPE="sovereign"
 
 
 # iii. Safely touch the file and inject the engine type
@@ -476,7 +467,6 @@ fi
 
 # --- 2. ENGINE INSTALLATION ---
 if [ "$FAST_UPDATE" = false ]; then
-    if [ "$ENGINE_CHOICE" == "1" ]; then
         echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"
 
         # Ensure npm is available and up to date before attempting build
@@ -534,30 +524,6 @@ if [ "$FAST_UPDATE" = false ]; then
         execute_command "cd \"$CLI_REPO_DIR\" && /usr/bin/npm install --ignore-scripts && NODE_OPTIONS=\"--max-old-space-size=8192\" /usr/bin/npm run build && /usr/bin/npm run bundle" "Build Sovereign Engine"
         ENGINE_TYPE="sovereign"
 
-    else
-        echo -e "${YELLOW}Configuring Gemini-CLI...${NC}"
-
-        if ! command -v gemini &>/dev/null; then
-            echo -e "${RED}Gemini CLI not found.${NC}"
-
-            if command -v npm &>/dev/null; then
-                echo -e "${YELLOW}Installing @google/gemini-cli via npm...${NC}"
-                if execute_command "sudo npm install -g @google/gemini-cli" "Install Gemini CLI globally"; then
-                    echo -e "${GREEN}✓ Gemini CLI installed${NC}"
-                else
-                    echo -e "${RED}Failed to install Gemini CLI. Ensure npm is available and you have sudo rights.${NC}"
-                    exit 1
-                fi
-            else
-                echo -e "${RED}npm not found. Cannot install Gemini CLI. Exiting.${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${GREEN}✓ Gemini CLI already installed${NC}"
-        fi
-
-        ENGINE_TYPE="cloud"
-    fi
 else
     echo -e "${GREEN}✓ Skipping engine build (Fast Update active)${NC}"
 fi
@@ -850,7 +816,7 @@ bare() {
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
 
-    local ENGINE_TYPE="cloud"
+    local ENGINE_TYPE="sovereign"
     if [ -f "$CONFIG" ]; then
         source "$CONFIG"
     fi
@@ -886,9 +852,6 @@ bare() {
     _tool_cap="$(printf '%s' "$_resolved" | cut -d'|' -f2)"
         echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
 
-        else
-            # Default fallback for Standard Gemini CLI
-            MODEL="gemini-2.5-flash-lite"
         fi
     fi
         
@@ -1006,33 +969,6 @@ bare() {
             echo -e "\033[0;32m📝 Session saved to Diary ($TODAY.md)\033[0m"
         fi
 
-    else
-
-        echo -e "\033[1;33m✨ [Engine: Gemini CLI | Model: $MODEL]\033[0m"
-
-        
-        local combined_const=""
-        
-        # 1. Primary Role Constitution (MOVED TO TOP)
-        if [ -f "$ROLE_CONST" ]; then
-            combined_const=$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")
-            combined_const="${combined_const}"$'\n\n---\n\n'
-        fi
-        
-        # 2. Technical Constitution & Bridge (NOW AT THE BOTTOM)
-        if [ -f "$TECH_CONST" ]; then
-            combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST")"
-        fi
-        
-        gemini -m "$MODEL" -i "$combined_const" "$@"
-        
-        # Log forwarding
-        if [ -f "GEMINI.md" ]; then
-            echo -e "\n--- SESSION APPENDED: $(date) [gemini] ---" >> "$DIARY"
-            cat "GEMINI.md" >> "$DIARY"
-            rm "GEMINI.md"
-            echo -e "\033[0;32m📝 Session saved to Diary ($TODAY.md)\033[0m"
-        fi
     fi
 }
 

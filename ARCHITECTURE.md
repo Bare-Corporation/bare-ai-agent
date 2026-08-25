@@ -26,7 +26,7 @@ The Brain is a compiled Golang orchestrator running as a daemon on a secure cont
 ### 👷 The Bare-AI Worker (The Execution Plane)
 This repository contains the Worker Agent framework. It is an intelligent, self-aware CLI toolset injected directly into the Linux `$PATH`.
 * **Level 4 Autonomy:** Workers run in `YOLA` (You Only Live Autonomously) mode, bypassing human confirmation prompts for trusted internal tasks.
-* **Dual-Engine:** Workers can utilize either the `Bare-AI-CLI` (Sovereign local models) or the `Gemini-CLI` (Cloud models) based on dynamic Vault routing.
+* **Single-Engine:** Workers run the `Bare-AI-CLI` (sovereign, local-first) with dynamic Vault routing to cloud models.
 
 ### 🧰 The Bare-Necessities Toolkit
 A suite of highly optimized bash/python scripts (`cpu-temp`, `pve-check`, `code-map`) deployed globally to `/usr/local/bin/`. These provide the local LLM with immediate context regarding its host environment without wasting tokens generating complex native shell commands.

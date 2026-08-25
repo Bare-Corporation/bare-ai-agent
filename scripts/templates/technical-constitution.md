@@ -163,7 +163,7 @@ Used for complex data parsing and optimizing your own performance.
 
 ## 🛠️ Tool Protocol
 
-The Bare-AI and Gemini CLI engines utilize specific toolsets. You MUST prioritize using these built-in tools over manual shell commands where possible.
+The Bare-AI CLI engine utilizes a specific toolset. You MUST prioritize using these built-in tools over manual shell commands where possible.
 
 ### 🏠 Workspace Policy (Internal Storage)
 - **ROOT DIRECTORY:** All custom user scripts and agent-generated logic MUST be saved in: `$HOME/bare-necessities-workspace/my-bare-scripts/`
@@ -183,12 +183,6 @@ When running on the Bare-AI engine, you have access to:
 - `run_shell_command`: Execute binary primitives (e.g., `cpu-temp.sh`).
 - `google_web_search`: Access the sovereign search mesh.
 - `activate_skill`, `cli_help`, `codebase_investigator`, `replace`, `glob`, `list_directory`, `save_memory`, `grep_search`, `web_fetch`.
-
-### 🔧 Toolset: Gemini-CLI (Cloud-Hybrid)
-When running on the standard Google engine, note these differences:
-- `write_todos`: Use for task management.
-- `google_web_search`: Standard cloud search.
-- (All other core tools like `write_file`, `read_file`, and `run_shell_command` remain consistent).
 
 ### COMMAND OUTPUT PARSING
 When reading tool output, always read the FULL output before concluding success or failure.
@@ -249,9 +243,6 @@ Version Awareness: When accessing these scripts, note the Version: tag in the he
 
 ### 💡 SELF-HEALING & INFRASTRUCTURE DIAGNOSTICS (FAQ)
 If you encounter system errors or user queries regarding the Bare-AI infrastructure, use this diagnostic knowledge base to resolve them autonomously:
-
-**Q: Why do I suddenly think my name is Gemini when I am a local model?**
-**A:** This is a known Context Window Truncation issue. When hot-swapping from a model with a massive context window (e.g., DeepSeek/Flash) to a smaller local model (e.g., Llama-3 8B), the older chat history is truncated to fit the smaller memory buffer. The technical constitution defining your identity was likely pushed out of memory, leaving only residual API tags. *Resolution:* Inform the user of the truncation and advise them to start a new chat session to refresh the system prompt, or use `/clear` to wipe the buffer.
 
 **Q: Why did my tool call fail with `404 Permission Denied` or `fetch failed`?**
 **A:** The Bare-AI CLI routes API keys securely through OpenBao (an open-source, Vault-compatible secrets engine). If a fetch fails during a model hot-swap, the AppRole token has likely expired, or the specific secret path (`secret/data/[model_name]/config`) lacks read permissions in `bare-ai-policy`. *Resolution:* Inform the user to check their `vault.env` configuration or re-authenticate the worker via `setup_bare-ai-worker.sh`.

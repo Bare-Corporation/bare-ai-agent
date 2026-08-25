@@ -5,10 +5,9 @@ infrastructure management on Linux hosts. It pairs a sovereign, local-first CLI
 (Bare-AI-CLI) with OpenBao for secrets management and SearXNG for private web
 search, so agent workloads can run without a hard dependency on cloud services.
 
-The system supports two AI engines:
+The system runs a single AI engine:
 
 - **Bare-AI-CLI** — sovereign, local-first
-- **Gemini-CLI** — Google Cloud
 
 **Author:** Cian Egan
 **Created:** 2026-02-02
@@ -43,16 +42,11 @@ authenticate to OpenBao via AppRole and receive endpoint URLs, model names, and
 API keys at runtime. Credentials are injected into the session environment and
 are not written to shell history or plaintext configuration files.
 
-### Hybrid engine support
+### Engine support
 
 | Engine | Type | Use case |
 | --- | --- | --- |
 | Bare-AI-CLI | Sovereign, local-first | Air-gapped environments, OpenBao integration |
-| Gemini-CLI | Cloud-based | Google Cloud models |
-
-The `bare` entrypoint auto-detects the installed engine (priority:
-Bare-AI-CLI, then Gemini-CLI). Override with `BARE_ENGINE=bare` or
-`BARE_ENGINE=gemini`.
 
 ---
 
@@ -84,7 +78,7 @@ change without breaking call sites.
 
 - Workers run with minimal permissions — telemetry reporting and task execution.
 - Telemetry is logged locally in JSON format.
-- No data leaves the network unless the Gemini-CLI engine is selected.
+- No data leaves the network unless a cloud model is explicitly selected.
 
 See [SECURITY.md](SECURITY.md) for the full security policy.
 
@@ -96,7 +90,6 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 | --- | --- | --- |
 | Ollama | Latest | Or llama.cpp (adjust port in OpenBao secrets accordingly) |
 | Bare-AI-CLI | Node.js, npm | `npm install -g bare-ai-cli` |
-| Gemini-CLI | Node.js, npm | `sudo npm install -g @google/gemini-cli` |
 | SSH | OpenSSH client | Required for `bare-enroll` |
 | jq | JSON processor | Required for `bare-status` |
 
@@ -109,9 +102,6 @@ with placeholder API keys. To enable a cloud model, patch the corresponding
 secret with a real key:
 
 ```bash
-# Gemini example
-bao kv patch secret/gemini-2.5-flash-lite/config api_key="YOUR_REAL_KEY_STARTS_WITH:AI"
-
 # OpenAI example
 bao kv patch secret/gpt-5.5/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
 
@@ -200,7 +190,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 curl -fsSL https://bare-ai.me/install.sh | bash
 ```
 
-The installer prompts for the AI engine (Bare-AI-CLI or Gemini-CLI).
+The installer installs and configures the Bare-AI-CLI engine.
 
 ---
 
@@ -237,8 +227,7 @@ bare-ai-agent/
 └── scripts/
     ├── bare-necessities/
     ├── templates/
-    ├── worker/
-    └── windows_alpha/
+    └── worker/
 ```
 
 After installation, runtime configuration is created at `~/.bare-ai/`:

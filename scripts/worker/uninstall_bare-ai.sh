@@ -63,15 +63,6 @@ rm -rf ~/bare-ai-cli
 rm -rf ~/.bare-ai 
 rm -rf ~/.config/bare-ai
 
-# Optional: Prompt to remove standard Gemini CLI config to prevent affecting non-bare workflows
-read -p "Do you also want to clear the standard Google Gemini CLI cache (~/.config/gemini)? (y/N) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    rm -rf ~/.config/gemini
-    rm -rf ~/.gemini
-    echo -e "${GREEN}Standard Gemini cache cleared.${NC}"
-fi
-
 echo -e "${GREEN}✅ UNINSTALLATION COMPLETE.${NC}"
 echo -e "The agent and all ghost paths have been permanently removed."
 echo -e "Run ${YELLOW}source ~/.bashrc${NC} to refresh your current terminal session."
