@@ -390,3 +390,49 @@ Yes. Avoid these inside inline shell commands:
 #  | |___| | (_) || |_| | (__| | | | | | |_     | |__| (_) |
 #   \____|_|\___/  \__,_|\___|_|_|_| |_|\__|     \____\___/
 #
+# TODO SYSTEM (Bare-AI Todo Manager)
+
+The agent tracks its own work in a stage-separated CSV todo system. This replaces the messy practice of parking pending tasks in diary notes or temp files. Treat the todo system as the single source of truth for task state.
+
+## Where it lives
+- Delivered at install/update to `~/bare-necessities-workspace/todo/` — its own standalone, persistent folder (never wiped on update).
+- Manager script: `~/bare-necessities-workspace/todo/todo.py`.
+- Global command (symlink): `todo` → that script. Prefer `todo ...` in normal use; fall back to `python3 ~/bare-necessities-workspace/todo/todo.py ...` if the symlink is missing.
+- Source of truth (repo): `scripts/bare-necessities/todo/` in bare-ai-agent.
+
+## Stage files (filename == lifecycle stage)
+Six CSVs sharing one identical header `id,title,description,status,priority,created_at,updated_at,due_date,tags,notes`:
+
+| File | Meaning | Append policy |
+|---|---|---|
+| `not_started.csv` | queued, not begun | bottom (FIFO backlog) |
+| `in_progress.csv` | actively worked on | top (LIFO focus) |
+| `issue.csv` | blocker / needs attention | top |
+| `on_hold.csv` | parked / waiting on something | bottom |
+| `completed.csv` | done | top (most recent first) |
+| `withdrawn.csv` | cancelled / no longer relevant | bottom |
+
+Read the two "hot" files (`not_started`, `in_progress`) for day-to-day work; touch the other four only when answering a user query.
+
+## Commands
+```bash
+todo init                                  # create/verify files + headers
+todo add "Title" --stage not_started --priority high --due 2026-09-01
+todo move <id> --to in_progress            # --to completed | on_hold | issue | withdrawn | not_started
+todo list --stage not_started              # --json for machine-readable output
+todo find <id>
+todo summary                               # row counts per stage
+todo validate                              # integrity check (headers + status/filename sync)
+```
+
+`add` defaults to `not_started`. `move` removes the row from its current file, refreshes `updated_at`, sets `status` to the target stage, and appends per the policy above.
+
+## RULES — MUST NOT DELETE
+1. **NEVER delete a todo row, and NEVER delete/truncate/overwrite a stage CSV file.** There is deliberately no delete command. To retire a task, `todo move <id> --to completed` (finished) or `--to withdrawn` (no longer relevant).
+2. Always go through `todo` / `todo.py` — never hand-edit the CSVs. Writes are atomic and the manager keeps the `status` column in sync with the filename.
+3. On starting a task: `todo add`. As it progresses: `todo move`. Keep useful context in `notes` so future sessions can pick up where you left off.
+
+## Diary vs todos
+- Diary (`~/bare-necessities-workspace/bare-ai-diary/`) = narrative log of what happened + learnings.
+- Todo system = living task state (queued / in-progress / blocked / done).
+- Do not park pending tasks in the diary; record them in the todo system instead.
