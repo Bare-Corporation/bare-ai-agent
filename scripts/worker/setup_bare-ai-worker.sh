@@ -522,6 +522,16 @@ if [ "$FAST_UPDATE" = false ]; then
         fi
 
         execute_command "cd \"$CLI_REPO_DIR\" && /usr/bin/npm install --ignore-scripts && NODE_OPTIONS=\"--max-old-space-size=8192\" /usr/bin/npm run build && /usr/bin/npm run bundle" "Build Sovereign Engine"
+        # --- Clone-based workflow: provision the agent work clone (non-destructive) ---
+        # The agent runs/commits/pushes ONLY from ~/bare-ai-cli-work, keeping the
+        # runtime clone ~/bare-ai-cli clean (pull-only) so agent files can never
+        # reach the public repo working tree again.
+        WORK_CLONE_DIR="$TARGET_HOME/bare-ai-cli-work"
+        if [ ! -d "$WORK_CLONE_DIR" ]; then
+            git clone "https://github.com/Bare-Corporation/bare-ai-cli.git" "$WORK_CLONE_DIR"
+        fi
+        ln -sfn "$CLI_REPO_DIR/node_modules" "$WORK_CLONE_DIR/node_modules"
+        cp -a "$CLI_REPO_DIR/bundle/." "$WORK_CLONE_DIR/bundle/"
         ENGINE_TYPE="sovereign"
 
 else
@@ -951,7 +961,7 @@ bare() {
             fi
         fi
 
-        # Launch from bare-ai-cli/ — sovereign.js resolves its own bundle
+        # Launch from the separate work clone (~/bare-ai-cli-work) — sovereign.js resolves its own bundle
         # relative to the working directory, so this cwd is required. The
         # agent itself must never write files here; only this launcher
         # touches this directory, and only to invoke node. Any transient
@@ -959,7 +969,7 @@ bare() {
         # immediately below; the auto-stash safety net in
         # setup_bare-ai-worker.sh catches any leftovers if a session ever
         # exits abnormally before that cleanup runs.
-        cd "$HOME/bare-ai-cli" && node sovereign.js "$@" --model "$MODEL"
+        cd "$HOME/bare-ai-cli-work" && node sovereign.js "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
