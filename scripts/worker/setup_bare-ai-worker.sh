@@ -532,6 +532,8 @@ if [ "$FAST_UPDATE" = false ]; then
         fi
         ln -sfn "$CLI_REPO_DIR/node_modules" "$WORK_CLONE_DIR/node_modules"
         cp -a "$CLI_REPO_DIR/bundle/." "$WORK_CLONE_DIR/bundle/"
+        # Wire the pre-commit guard (husky) so the BARE_AI.md leak guard is active here too
+        (cd "$WORK_CLONE_DIR" && node_modules/.bin/husky 2>/dev/null || true)
         ENGINE_TYPE="sovereign"
 
 else
