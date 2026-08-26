@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# BARE-AI secret-prevention pre-commit hook (Phase 3).
+# 1) Refuses to commit a non-blank role.md (live role data belongs outside the repo).
+# 2) Scans staged changes with gitleaks; blocks on any secret hit.
+#
+# Install (one-time, per clone):
+#   git config core.hooksPath .githooks
+#
+# Emergency bypass:  git commit --no-verify
+
+set -u
+
+# --- agent-file guard -------------------------------------------------------
+if ! git diff --cached --quiet -- role.md; then
+  if [ -s role.md ]; then
+    echo "BLOCKED: role.md must not be committed with live role data."
+    echo "role.md is a symlink to ~/.bare-ai/role.md and is gitignored."
+    exit 1
+  fi
+fi
+
+# --- gitleaks secret scan ---------------------------------------------------
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks not found on PATH. Install it to enable secret scanning:"
+  echo "  https://github.com/gitleaks/gitleaks"
+  echo "Emergency bypass: git commit --no-verify"
+  exit 1
+fi
+
+gitleaks git --staged --redact --no-banner --verbose || {
+  echo ""
+  echo "===================================================="
+  echo "BLOCKED: gitleaks detected a secret in staged changes."
+  echo "Remove the secret (or use a placeholder), then retry."
+  echo "Emergency bypass: git commit --no-verify"
+  echo "===================================================="
+  exit 1
+}
