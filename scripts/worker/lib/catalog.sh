@@ -9,6 +9,7 @@
 COUNCIL_API_BASE_URL="${COUNCIL_API_BASE_URL:-https://api.bare-ai.net}"
 CATALOG_CACHE="${CATALOG_CACHE:-$HOME/.bare-ai/model-catalog.json}"
 CATALOG_MAX_AGE_SEC="${CATALOG_MAX_AGE_SEC:-3600}"
+CATALOG_FALLBACK_MARKER="${CATALOG_CACHE}.fallback"
 
 # Baked fallback: minimal catalog if network + cache both unavailable.
 # (cloud essentials + council; local models resolve from cache when present)
@@ -34,6 +35,7 @@ catalog_fetch() {
     if jq -e '.models | length > 0' "$tmp" >/dev/null 2>&1; then
       mv -f "$tmp" "$CATALOG_CACHE"
       rm -f "$tmp" 2>/dev/null
+      rm -f "$CATALOG_FALLBACK_MARKER" 2>/dev/null
       return 0
     fi
   fi
@@ -42,6 +44,7 @@ catalog_fetch() {
   [ -s "$CATALOG_CACHE" ] && return 0
   # no cache either: write baked fallback
   _catalog_baked_fallback > "$CATALOG_CACHE"
+  touch "$CATALOG_FALLBACK_MARKER"
   return 0
 }
 
@@ -56,7 +59,7 @@ catalog_ensure() {
   now=$(date +%s)
   mtime=$(stat -c %Y "$CATALOG_CACHE" 2>/dev/null || echo 0)
   age=$(( now - mtime ))
-  if [ "$age" -gt "$CATALOG_MAX_AGE_SEC" ]; then
+  if [ "$age" -gt "$CATALOG_MAX_AGE_SEC" ] || [ -f "$CATALOG_FALLBACK_MARKER" ]; then
     catalog_fetch
   fi
   return 0
