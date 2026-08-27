@@ -79,7 +79,7 @@ installer:
 - **Standard** (`install.sh`) — single-machine deployment. All components
   (agent, OpenBao, SearXNG, inference) co-locate on one host and bind to
   `127.0.0.1`.
-- **Pro** (`install-pro.sh`) — multi-machine / LXC isolation. Components are
+- **Pro** (`install-pro.sh`) — multi-machine / container isolation (VM, LXC, Docker, Podman). Components are
   spread across nodes (OpenBao, SearXNG, and a dedicated CPU inference/Council
   node). Long-lived services bind to `0.0.0.0` and the installer prompts for each
   remote node's address when wiring cross-node endpoints.

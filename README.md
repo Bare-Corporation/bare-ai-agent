@@ -47,7 +47,7 @@ are not written to shell history or plaintext configuration files.
 | Engine | Type | Use case |
 | --- | --- | --- |
 | Bare-AI-CLI | Sovereign, local-first client | Air-gapped environments, OpenBao integration |
-| llama.cpp (`llama-server`) | Local inference | CPU-bound performance, strict OpenAI fidelity |
+| llama.cpp (`llama-server`) | Local inference | Strict OpenAI API/tool-calling fidelity |
 | Ollama | Local inference | Ease of use, quick model pulls |
 
 ---
@@ -64,7 +64,7 @@ topologies:
   curl -fsSL https://bare-ai.me/install.sh | bash
   ```
 
-- **Pro** — multi-machine / LXC isolation. Each responsibility is isolated onto
+- **Pro** — multi-machine / container isolation (VM, LXC, Docker, Podman). Each responsibility is isolated onto
   its own node or container (OpenBao on one node, SearXNG on another,
   inference/Council on a dedicated CPU node). Long-lived services bind to
   `0.0.0.0` and the installer prompts for each remote node's IP.
@@ -77,8 +77,8 @@ topologies:
 
 During setup you are offered three options (both engines are MIT-licensed):
 
-1. **llama.cpp (`llama-server`)** — recommended for CPU-bound performance and
-   strict OpenAI API/tool-calling fidelity. The installer fetches a prebuilt
+1. **llama.cpp (`llama-server`)** — recommended for strict OpenAI API/tool-calling
+   fidelity. The installer fetches a prebuilt
    `llama-server` binary, downloads a small default GGUF model, and runs it as a
    rootless user systemd service on port `8081`.
 2. **Ollama** — recommended for ease of use and quick model pulls. Installed via
@@ -231,7 +231,7 @@ runtime.
 curl -fsSL https://bare-ai.me/install.sh | bash
 ```
 
-### Pro (multi-machine / LXC isolation)
+### Pro (multi-machine / container isolation)
 
 ```bash
 curl -fsSL https://bare-ai.pro/install-pro.sh | bash
