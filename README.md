@@ -46,7 +46,9 @@ are not written to shell history or plaintext configuration files.
 
 | Engine | Type | Use case |
 | --- | --- | --- |
-| Bare-AI-CLI | Sovereign, local-first | Air-gapped environments, OpenBao integration |
+| Bare-AI-CLI | Sovereign, local-first client | Air-gapped environments, OpenBao integration |
+| llama.cpp (`llama-server`) | Local inference | CPU-bound performance, strict OpenAI fidelity |
+| Ollama | Local inference | Ease of use, quick model pulls |
 
 ---
 
@@ -130,8 +132,10 @@ See [SECURITY.md](SECURITY.md) for the full security policy.
 
 | Component | Requirement | Notes |
 | --- | --- | --- |
-| Ollama | Latest | Or llama.cpp (adjust port in OpenBao secrets accordingly) |
-| Bare-AI-CLI | Node.js, npm | `npm install -g bare-ai-cli` |
+| Inference engine | llama.cpp or Ollama | Provisioned by the installer (or bring your own endpoint) |
+| Bare-AI-CLI | Node.js, npm | Installed and bundled by the installer |
+| OpenBao | Latest | Provisioned by the installer (or reuse an existing server) |
+| SearXNG | Docker | Provisioned by the installer (or reuse an existing instance) |
 | SSH | OpenSSH client | Required for `bare-enroll` |
 | jq | JSON processor | Required for `bare-status` |
 
@@ -188,10 +192,12 @@ export VAULT_SECRET_ID=<SECRET_ID>
 - **Tailscale / Headscale** — use the overlay network to reach workers from
   outside the LAN. Tailscale must be installed and authenticated on each node.
 
-The inference server must listen on the network so workers can reach it:
+The inference server must listen on the network so workers can reach it. The Pro
+installer binds both engines to `0.0.0.0` automatically; to do it manually:
 
 ```bash
-export OLLAMA_HOST=0.0.0.0
+export OLLAMA_HOST=0.0.0.0                              # Ollama
+llama-server --host 0.0.0.0 --port 8081 -m <model.gguf> # llama.cpp
 ```
 
 Fleet traffic over Tailscale/Headscale is encapsulated in an encrypted WireGuard
@@ -219,20 +225,23 @@ The installer deploys global symlinks for deterministic host management:
 The repository can be cloned to any directory; scripts detect their location at
 runtime.
 
-### Option 1 — worker node only
+### Standard (single machine)
 
 ```bash
 curl -fsSL https://bare-ai.me/install.sh | bash
 ```
 
-### Option 2 — worker and inference on one node
+### Pro (multi-machine / LXC isolation)
 
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
-curl -fsSL https://bare-ai.me/install.sh | bash
+curl -fsSL https://bare-ai.pro/install-pro.sh | bash
 ```
 
-The installer installs and configures the Bare-AI-CLI engine.
+The installer provisions OpenBao, SearXNG, and a sovereign inference engine
+(llama.cpp or Ollama — or you can bring your own endpoint), then builds and
+wires up the Bare-AI-CLI. See
+[Deployment topologies & inference engines](#deployment-topologies--inference-engines)
+for details.
 
 ---
 
@@ -252,7 +261,7 @@ bare-uninstall
 bare <LLMName>
 ```
 
-Session logs are written to `~/.bare-ai/diary/YYYY-MM-DD.md` with engine tagging.
+Session logs are written to `~/bare-necessities-workspace/bare-ai-diary/YYYY-MM-DD.md` with engine tagging.
 
 ---
 
@@ -277,11 +286,15 @@ After installation, runtime configuration is created at `~/.bare-ai/`:
 ```
 ~/.bare-ai/
 ├── bin/              # Installed tools (added to PATH)
-├── diary/            # Session logs
+├── models/           # Default GGUF model weights (llama.cpp)
 ├── logs/             # JSON telemetry logs
-├── config/           # Agent configuration
-├── agent.env         # Repository path (set at install time)
+├── config/
+│   ├── agent.env     # ENGINE_TYPE, AGENT_ID, BARE_AI_ENDPOINT, BARE_AI_SEARCH_URL
+│   └── vault.env     # OpenBao AppRole credentials
 └── technical-constitution.md
+
+The agent-authored workspace (scripts, diary) lives in
+`~/bare-necessities-workspace/`, separate from the git-tracked repositories.
 ```
 
 ---
