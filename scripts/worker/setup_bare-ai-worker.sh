@@ -465,6 +465,192 @@ fi
 #####################################################
 #####################################################
 
+# --- 1d. SOVEREIGN INFERENCE ENGINE SETUP ---
+# bare-ai-cli speaks native OpenAI-compatible endpoints. Offer a choice of
+# sovereign inference engine (both MIT-licensed):
+#   [1] llama.cpp (llama-server) — CPU-bound performance + strict OpenAI fidelity
+#   [2] Ollama                   — ease of use + quick model pulls
+#   [3] Skip                     — user supplies their own endpoint
+# Port 8081 is used (8080 is already bound by the SearXNG container above).
+echo -e "${YELLOW}Checking local inference engine...${NC}"
+
+MODELS_DIR="$TARGET_HOME/.bare-ai/models"
+mkdir -p "$MODELS_DIR"
+
+LLAMA_SERVER_BIN=""
+OLLAMA_BIN=""
+if command -v llama-server &>/dev/null; then LLAMA_SERVER_BIN="$(command -v llama-server)"; fi
+if command -v ollama       &>/dev/null; then OLLAMA_BIN="$(command -v ollama)"; fi
+
+INFERENCE_CHOICE=""
+INFERENCE_ENDPOINT=""
+INFERENCE_ADDR_IP=""
+
+# Advertised host: loopback for single-machine (free), node IP for multi-machine (pro)
+if [ "$TIER" = "pro" ]; then
+    INFERENCE_ADDR_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+
+if [ -n "$LLAMA_SERVER_BIN" ] || [ -n "$OLLAMA_BIN" ]; then
+    if [ -n "$LLAMA_SERVER_BIN" ]; then
+        INFERENCE_CHOICE="1"
+        echo -e "${GREEN}✓ llama-server detected at $LLAMA_SERVER_BIN${NC}"
+    else
+        INFERENCE_CHOICE="2"
+        echo -e "${GREEN}✓ Ollama detected at $OLLAMA_BIN${NC}"
+    fi
+else
+    echo -e "No local inference engine detected. Choose an engine to install:"
+    echo -e "  ${GREEN}[1]${NC} llama.cpp (llama-server) — recommended for CPU performance & strict OpenAI API fidelity"
+    echo -e "  ${GREEN}[2]${NC} Ollama                     — recommended for ease of use & quick model pulls"
+    echo -e "  ${GREEN}[3]${NC} Skip                       — I will provide my own endpoint"
+    read -rp "Select [1/2/3]: " INFERENCE_CHOICE
+fi
+
+case "$INFERENCE_CHOICE" in
+  1)
+    # ---------- llama.cpp (llama-server) ----------
+    echo -e "${YELLOW}Installing llama.cpp (llama-server)...${NC}"
+
+    if [ -z "$LLAMA_SERVER_BIN" ]; then
+        LLAMA_ARCH=""
+        case "$(uname -m)" in
+            x86_64|amd64) LLAMA_ARCH="x64" ;;
+            aarch64|arm64) LLAMA_ARCH="arm64" ;;
+        esac
+        if [ -z "$LLAMA_ARCH" ]; then
+            echo -e "${RED}❌ Unsupported architecture: $(uname -m). Choose Ollama or Skip instead.${NC}"
+        else
+            LLAMA_REPO="ggml-org/llama.cpp"
+            LLAMA_TAG="$(curl -fsSL --max-time 20 "https://api.github.com/repos/${LLAMA_REPO}/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+            if [ -z "$LLAMA_TAG" ]; then
+                echo -e "${RED}❌ Could not resolve latest llama.cpp release (GitHub API rate limit?). Skipping engine install.${NC}"
+            else
+                LLAMA_ASSET="llama-${LLAMA_TAG}-bin-ubuntu-${LLAMA_ARCH}.tar.gz"
+                LLAMA_URL="https://github.com/${LLAMA_REPO}/releases/download/${LLAMA_TAG}/${LLAMA_ASSET}"
+                LLAMA_TMP="$(mktemp -d)"
+                if curl -fsSL --max-time 600 -o "$LLAMA_TMP/llama.tar.gz" "$LLAMA_URL"; then
+                    tar -xzf "$LLAMA_TMP/llama.tar.gz" -C "$LLAMA_TMP" 2>/dev/null || true
+                    LLAMA_SERVER_SRC="$(find "$LLAMA_TMP" -type f -name 'llama-server' 2>/dev/null | head -1)"
+                    if [ -n "$LLAMA_SERVER_SRC" ]; then
+                        install -m 0755 "$LLAMA_SERVER_SRC" "$BIN_DIR/llama-server"
+                        LLAMA_SERVER_BIN="$BIN_DIR/llama-server"
+                        echo -e "${GREEN}✓ llama-server installed to $LLAMA_SERVER_BIN${NC}"
+                    else
+                        echo -e "${RED}❌ llama-server binary not found in archive (no $LLAMA_ARCH prebuilt for $LLAMA_TAG?).${NC}"
+                    fi
+                else
+                    echo -e "${RED}❌ Download failed for $LLAMA_ASSET (no $LLAMA_ARCH prebuilt for $LLAMA_TAG?).${NC}"
+                fi
+                rm -rf "$LLAMA_TMP"
+            fi
+        fi
+    fi
+
+    if [ -n "$LLAMA_SERVER_BIN" ]; then
+        # Download a tiny default GGUF model so llama-server does not crash-loop
+        DEFAULT_MODEL="$MODELS_DIR/default.gguf"
+        if [ ! -s "$DEFAULT_MODEL" ]; then
+            echo -e "${YELLOW}Downloading default model (Qwen1.5-0.5B-Chat GGUF, ~400MB)...${NC}"
+            if curl -fsSL --max-time 1800 
+                "https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat-GGUF/resolve/main/qwen1_5-0_5b-chat-q4_k_m.gguf" 
+                -o "$DEFAULT_MODEL"; then
+                echo -e "${GREEN}✓ Default model downloaded to $DEFAULT_MODEL${NC}"
+            else
+                echo -e "${RED}⚠️ Default model download failed. llama-server will need a model loaded manually.${NC}"
+            fi
+        fi
+
+        # ---------- rootless user-level systemd unit ----------
+        LLAMA_UNIT_DIR="$TARGET_HOME/.config/systemd/user"
+        mkdir -p "$LLAMA_UNIT_DIR"
+        if [ "$TIER" = "pro" ]; then
+            LLAMA_BIND_HOST="0.0.0.0"
+        else
+            LLAMA_BIND_HOST="127.0.0.1"
+        fi
+        cat > "$LLAMA_UNIT_DIR/llama-server.service" <<EOF
+[Unit]
+Description=Bare-AI llama.cpp Inference Server (llama-server)
+After=network.target
+
+[Service]
+ExecStart=$LLAMA_SERVER_BIN --host $LLAMA_BIND_HOST --port 8081 -m $DEFAULT_MODEL
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+        # Enable lingering so the user session (and this service) survives reboots
+        if command -v loginctl >/dev/null 2>&1; then
+            execute_command "sudo loginctl enable-linger "$TARGET_USER"" "Enable user lingering for $TARGET_USER"
+        fi
+        # Reload + enable + start the user unit in the target user's session
+        USER_UID="$(id -u "$TARGET_USER" 2>/dev/null || echo 1000)"
+        execute_command "sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" systemctl --user daemon-reload && sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" systemctl --user enable --now llama-server" "Enable and start llama-server user service"
+
+        if [ "$TIER" = "pro" ]; then
+            read -rp "Inference node IP for other nodes to reach [${INFERENCE_ADDR_IP}]: " PROMPTED_IP
+            [ -n "$PROMPTED_IP" ] && INFERENCE_ADDR_IP="$PROMPTED_IP"
+            INFERENCE_ENDPOINT="http://${INFERENCE_ADDR_IP}:8081/v1/chat/completions"
+        else
+            INFERENCE_ENDPOINT="http://127.0.0.1:8081/v1/chat/completions"
+        fi
+        echo -e "${GREEN}✓ llama-server configured. Endpoint: $INFERENCE_ENDPOINT${NC}"
+    fi
+    ;;
+
+  2)
+    # ---------- Ollama ----------
+    echo -e "${YELLOW}Installing Ollama...${NC}"
+    if [ -z "$OLLAMA_BIN" ]; then
+        execute_command "curl -fsSL https://ollama.com/install.sh | sh" "Install Ollama via official script"
+        if command -v ollama &>/dev/null; then OLLAMA_BIN="$(command -v ollama)"; fi
+    fi
+    if [ -n "$OLLAMA_BIN" ]; then
+        # Pro: bind Ollama to all interfaces so distributed nodes can reach it
+        if [ "$TIER" = "pro" ]; then
+            sudo mkdir -p /etc/systemd/system/ollama.service.d
+            sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null <<EOF
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0"
+EOF
+            execute_command "sudo systemctl daemon-reload && sudo systemctl restart ollama" "Bind Ollama to 0.0.0.0 and restart"
+        fi
+        if [ "$TIER" = "pro" ]; then
+            read -rp "Ollama node IP for other nodes to reach [${INFERENCE_ADDR_IP}]: " PROMPTED_IP
+            [ -n "$PROMPTED_IP" ] && INFERENCE_ADDR_IP="$PROMPTED_IP"
+            INFERENCE_ENDPOINT="http://${INFERENCE_ADDR_IP}:11434/v1/chat/completions"
+        else
+            INFERENCE_ENDPOINT="http://127.0.0.1:11434/v1/chat/completions"
+        fi
+        echo -e "${GREEN}✓ Ollama configured. Endpoint: $INFERENCE_ENDPOINT${NC}"
+    else
+        echo -e "${RED}❌ Ollama installation did not produce an 'ollama' binary. Choose Skip and provide your own endpoint.${NC}"
+    fi
+    ;;
+
+  3|*)
+    # ---------- Skip / custom endpoint ----------
+    read -rp "Enter your OpenAI-compatible completions endpoint (e.g., http://192.168.1.50:8081/v1/chat/completions), or leave blank to skip: " CUSTOM_ENDPOINT
+    if [ -n "$CUSTOM_ENDPOINT" ]; then
+        INFERENCE_ENDPOINT="$CUSTOM_ENDPOINT"
+        echo -e "${GREEN}✓ Custom inference endpoint set to $INFERENCE_ENDPOINT${NC}"
+    else
+        echo -e "${YELLOW}⚠️ No inference endpoint configured. Set BARE_AI_ENDPOINT manually to enable local routing.${NC}"
+    fi
+    ;;
+esac
+
+# Persist BARE_AI_ENDPOINT idempotently (sourced by the bare() launcher)
+if [ -n "$INFERENCE_ENDPOINT" ]; then
+    sed -i '/export BARE_AI_ENDPOINT=/d' "$CONFIG_FILE"
+    echo "# Sovereign Inference Override" >> "$CONFIG_FILE"
+    echo "export BARE_AI_ENDPOINT="$INFERENCE_ENDPOINT"" >> "$CONFIG_FILE"
+fi
+
+
 # --- 2. ENGINE INSTALLATION ---
 if [ "$FAST_UPDATE" = false ]; then
         echo -e "${GREEN}Configuring Sovereign Bare-AI Engine...${NC}"

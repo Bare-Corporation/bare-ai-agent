@@ -50,6 +50,48 @@ are not written to shell history or plaintext configuration files.
 
 ---
 
+## Deployment topologies & inference engines
+
+Bare-AI-Agent ships two installer entry points mapping to two deployment
+topologies:
+
+- **Standard** — single-machine. Everything (agent, OpenBao, SearXNG, and the
+  inference engine) co-locates on one host and binds to `127.0.0.1`.
+
+  ```bash
+  curl -fsSL https://bare-ai.me/install.sh | bash
+  ```
+
+- **Pro** — multi-machine / LXC isolation. Each responsibility is isolated onto
+  its own node or container (OpenBao on one node, SearXNG on another,
+  inference/Council on a dedicated CPU node). Long-lived services bind to
+  `0.0.0.0` and the installer prompts for each remote node's IP.
+
+  ```bash
+  curl -fsSL https://bare-ai.pro/install-pro.sh | bash
+  ```
+
+### Choosing a sovereign inference engine
+
+During setup you are offered three options (both engines are MIT-licensed):
+
+1. **llama.cpp (`llama-server`)** — recommended for CPU-bound performance and
+   strict OpenAI API/tool-calling fidelity. The installer fetches a prebuilt
+   `llama-server` binary, downloads a small default GGUF model, and runs it as a
+   rootless user systemd service on port `8081`.
+2. **Ollama** — recommended for ease of use and quick model pulls. Installed via
+   the official script and exposed on port `11434`.
+3. **Skip** — provide your own OpenAI-compatible endpoint.
+
+The chosen engine's endpoint is written to `BARE_AI_ENDPOINT` in
+`~/.bare-ai/config/agent.env`, which the `bare` launcher sources automatically.
+
+| Engine | Standard bind | Pro bind | Free-tier endpoint |
+| --- | --- | --- | --- |
+| llama-server | `127.0.0.1:8081` | `0.0.0.0:8081` | `http://127.0.0.1:8081/v1/chat/completions` |
+| Ollama | `127.0.0.1:11434` | `0.0.0.0:11434` | `http://127.0.0.1:11434/v1/chat/completions` |
+
+
 ## Features
 
 - Autonomous agentic execution on Linux hosts.

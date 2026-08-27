@@ -68,3 +68,37 @@ The Sovereign architecture utilizes a **Tailscale/Headscale Mesh Overlay**.
 
 ## 6. End-State Goal
 When this repository is deployed to a fresh Linux node, that node ceases to be a static VM. It becomes a context-aware, self-documenting "Doer" capable of repairing its own software stacks while reporting to the Sovereign Brain.
+
+## 7. Deployment Topologies & Sovereign Inference
+
+### Standard vs Pro
+
+Bare-AI-Agent supports two installation topologies, selected by the entry-point
+installer:
+
+- **Standard** (`install.sh`) — single-machine deployment. All components
+  (agent, OpenBao, SearXNG, inference) co-locate on one host and bind to
+  `127.0.0.1`.
+- **Pro** (`install-pro.sh`) — multi-machine / LXC isolation. Components are
+  spread across nodes (OpenBao, SearXNG, and a dedicated CPU inference/Council
+  node). Long-lived services bind to `0.0.0.0` and the installer prompts for each
+  remote node's address when wiring cross-node endpoints.
+
+### Inference engine integration
+
+`bare-ai-cli` consumes a native OpenAI-compatible endpoint. The installer detects
+an existing engine (`llama-server` or `ollama`) and, if none is present, offers to
+provision one:
+
+- **llama.cpp (`llama-server`)** — prebuilt binary installed to `~/.bare-ai/bin`,
+  a default GGUF model placed in `~/.bare-ai/models`, and a rootless user
+  systemd unit (`~/.config/systemd/user/llama-server.service`) bound to port
+  `8081` (loopback on Standard, `0.0.0.0` on Pro). Lingering
+  (`loginctl enable-linger`) keeps the service alive across reboots.
+- **Ollama** — installed via the official script on port `11434`; on Pro an
+  `OLLAMA_HOST=0.0.0.0` systemd override exposes it to sibling nodes.
+
+The selected engine is recorded as `BARE_AI_ENDPOINT` in
+`~/.bare-ai/config/agent.env`, which the `bare()` launcher sources before
+invoking the CLI.
+
