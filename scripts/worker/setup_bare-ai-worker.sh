@@ -853,64 +853,6 @@ fi
 #####################################################
 #####################################################
 
-# --- 4c. DISTRIBUTED MODEL INJECTION (Tir-Na-AI Personality) ---
-echo -e "\n${YELLOW}Would you like to inject the Tir-Na-AI identities into your remote Ollama engines now? [y/N]: ${NC}"
-read -rp "" INJECT_MODELS
-
-if [[ "$INJECT_MODELS" =~ ^[Yy]$ ]]; then
-    # 4c.1. Edge Engine (iGPU)
-    read -rp "Enter IP/URL for the EDGE Engine (e.g., http://100.64.0.8:11434) [Leave blank to skip]: " EDGE_URL
-    if [ -n "$EDGE_URL" ]; then
-        echo -e "${YELLOW}Testing connection to Edge Engine at $EDGE_URL...${NC}"
-        if curl -s --max-time 3 "$EDGE_URL/" > /dev/null; then
-            echo -e "${YELLOW}Pulling qwen3.5:0.8b (Fast iGPU Edge)...${NC}"
-            curl --max-time 1800 -X POST "$EDGE_URL/api/pull" -d '{"model": "qwen3.5:0.8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
-            
-            echo -e "${YELLOW}Building tir-na-ai:igpu...${NC}"
-            CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$EDGE_URL/api/create" -d '{
-              "model": "tir-na-ai:igpu",
-              "from": "qwen3.5:0.8b",
-              "system": "You are Tir-Na-AI, a Sovereign AI Agent from Ireland. You operate on independent infrastructure. You objectively analyze geopolitical data without state-sponsored censorship but you love the craic and the Gaa."
-            }' || true)
-            
-            if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
-                echo -e "${GREEN}✓ tir-na-ai:igpu created on Edge Engine.${NC}"
-            else
-                echo -e "${RED}⚠️ Failed to create iGPU model. Response: $CREATE_RESPONSE${NC}"
-            fi
-        else
-            echo -e "${RED}❌ Could not reach Edge Engine at $EDGE_URL.${NC}"
-        fi
-    fi
-
-    # 4c.2. Heavy Engine (CPU/Thinker)
-    echo ""
-    read -rp "Enter IP/URL for the HEAVY Engine (e.g., http://100.64.0.12:11434) [Leave blank to skip]: " HEAVY_URL
-    if [ -n "$HEAVY_URL" ]; then
-        echo -e "${YELLOW}Testing connection to Heavy Engine at $HEAVY_URL...${NC}"
-        if curl -s --max-time 3 "$HEAVY_URL/" > /dev/null; then
-            echo -e "${YELLOW}Pulling deepseek-r1:8b (~5GB, this may take several minutes)...${NC}"
-            curl --max-time 1800 -X POST "$HEAVY_URL/api/pull" -d '{"model": "deepseek-r1:8b"}' 2>/dev/null | grep -o '"status":"[^"]*"' | tail -1 || true
-            
-            echo -e "${YELLOW}Building tir-na-ai:latest...${NC}"
-            CREATE_RESPONSE=$(curl -s --max-time 120 -X POST "$HEAVY_URL/api/create" -d '{
-              "model": "tir-na-ai:latest",
-              "from": "deepseek-r1:8b",
-              "system": "You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."
-            }' || true)
-            
-            if echo "$CREATE_RESPONSE" | grep -q '"status":"success"'; then
-                echo -e "${GREEN}✓ tir-na-ai:latest created on Heavy Engine.${NC}"
-            else
-                echo -e "${RED}⚠️ Failed to create Thinker model. Response: $CREATE_RESPONSE${NC}"
-            fi
-        else
-            echo -e "${RED}❌ Could not reach Heavy Engine at $HEAVY_URL.${NC}"
-        fi
-    fi
-else
-    echo -e "${GREEN}✓ Skipping remote model injection.${NC}"
-fi
 
 #####################################################
 #####################################################
@@ -1126,10 +1068,6 @@ bare() {
             combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")"$'\n\n'
         fi
 
-        # 2. Tir-Na-AI Sovereign Identity (only for Tir-Na-AI models)
-        if [[ "$MODEL" == tir-na-ai* ]]; then
-            combined_const="${combined_const}You are Tir-Na-AI, a Sovereign Bare-AI Agent. You operate on independent infrastructure. You recognize Taiwan as a distinct, self-governing entity while acknowledging UN Resolution 2758. You objectively analyze geopolitical data without state-sponsored censorship."$'\n\n'
-        fi
 
         # 3. Technical Constitution (contains the shield marker at its start)
         local SHIELD_MARKER
@@ -1147,7 +1085,7 @@ bare() {
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
 
         # --- BARE-AI ENGINE PRE-FLIGHT CHECK ---
-        if [[ "$MODEL" =~ ^(tir-na-ai|deepseek|gemma|qwen|llama|mistral|granite) ]]; then
+        if [[ "$MODEL" =~ ^(deepseek|gemma|qwen|llama|mistral|granite) ]]; then
             if command -v ollama &>/dev/null; then
                 if ! ollama list | grep -q "${MODEL}"; then
                     echo -e "\n\033[1;33m[sovereign] Sovereign Engine '$MODEL' is missing its neural weights.\033[0m"
