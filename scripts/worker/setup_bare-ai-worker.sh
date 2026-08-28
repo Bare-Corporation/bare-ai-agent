@@ -41,6 +41,7 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         --fast) FAST_UPDATE=true; echo -e "${YELLOW}FAST MODE: Skipping engine rebuild...${NC}" ;;
         --tier) TIER="$2"; shift ;;
+        --pro) TIER="pro"; PRO_MODE=true ;;
     esac
     shift
 done
@@ -176,9 +177,26 @@ AGENT_ROLE_ID="your-role-id-here"
 AGENT_SECRET_ID="your-secret-id-here"
 SKIP_VAULT_ADMIN=false
 
-read -rp "Do you have an existing OpenBao Vault server for this agent? [y/N/unsure]: " HAS_VAULT
+PRO_VAULT_REUSE=false
+if [ "$PRO_MODE" = "true" ] && [ -f "$VAULT_ENV_FILE" ]; then
+    . "$VAULT_ENV_FILE"
+    if [ -n "${VAULT_ADDR:-}" ]; then
+        PRO_VAULT_REUSE=true
+        HAS_VAULT="y"
+        USER_VAULT_ADDR="$VAULT_ADDR"
+        VAULT_ACTION="1"
+        SKIP_VAULT_ADMIN=true
+        export VAULT_TOKEN="not-needed-for-reuse"
+        echo -e "${GREEN}⭐ Bare-AI Pro: reusing existing Vault (${USER_VAULT_ADDR}) — secrets preserved.${NC}"
+    fi
+fi
+if [ "$PRO_VAULT_REUSE" != "true" ]; then
+    read -rp "Do you have an existing OpenBao Vault server for this agent? [y/N/unsure]: " HAS_VAULT
+fi
 if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
-    read -rp "Enter Vault Address (e.g., https://192.168.1.50:8200): " USER_VAULT_ADDR
+    if [ "$PRO_VAULT_REUSE" != "true" ]; then
+        read -rp "Enter Vault Address (e.g., https://192.168.1.50:8200): " USER_VAULT_ADDR
+    fi
     echo -e "Testing connectivity to $USER_VAULT_ADDR..."
 
     if curl -s -k --max-time 5 "$USER_VAULT_ADDR/v1/sys/health" > /dev/null 2>&1 || curl -s -k --max-time 5 "$USER_VAULT_ADDR" > /dev/null 2>&1; then
@@ -190,7 +208,9 @@ if [[ "$HAS_VAULT" =~ ^[Yy]$ ]]; then
             echo -e "\n${GREEN}⭐ Bare-AI Pro Edition Mesh detected.${NC}"
             echo "1) Reuse existing Bare-AI secrets (Join existing Mesh — recommended)"
             echo "2) Reset/Overwrite Bare-AI secrets (Initialize new Mesh)"
-            read -rp "Select [1 or 2]: " VAULT_ACTION
+            if [ "$PRO_VAULT_REUSE" != "true" ]; then
+                read -rp "Select [1 or 2]: " VAULT_ACTION
+            fi
         else
             echo -e "\n${RED}⚠️ NOTICE: Free Edition will re-seed model paths (existing Bare-AI secrets will be lost).${NC}"
             echo -e "${YELLOW}To join an existing Mesh without overwriting secrets, you require the Bare-AI Pro Edition.${NC}"
@@ -1233,3 +1253,4 @@ echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< required.)"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "4. ${GREEN}Update:${NC}        bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
 echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
+alias bare-update-pro='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro && source ~/.bashrc'
