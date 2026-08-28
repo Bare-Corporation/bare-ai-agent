@@ -1013,6 +1013,7 @@ bare() {
     local DIARY="$HOME/bare-necessities-workspace/bare-ai-diary/$TODAY.md"
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
+    local BARE_CLONE="${BARE_CLONE_DIR:-$HOME/bare-ai-cli}"
 
     local ENGINE_TYPE="sovereign"
     if [ -f "$CONFIG" ]; then
@@ -1149,7 +1150,7 @@ bare() {
             fi
         fi
 
-        # Launch from the separate work clone (~/bare-ai-cli-work) — sovereign.js resolves its own bundle
+        # Launch from the selected CLI clone (BARE_CLONE_DIR, defaults to ~/bare-ai-cli) — sovereign.js resolves its own bundle
         # relative to the working directory, so this cwd is required. The
         # agent itself must never write files here; only this launcher
         # touches this directory, and only to invoke node. Any transient
@@ -1157,7 +1158,7 @@ bare() {
         # immediately below; the auto-stash safety net in
         # setup_bare-ai-worker.sh catches any leftovers if a session ever
         # exits abnormally before that cleanup runs.
-        cd "$HOME/bare-ai-cli-work" && node sovereign.js "$@" --model "$MODEL"
+        cd "$BARE_CLONE" && node sovereign.js "$@" --model "$MODEL"
 
         # Log forwarding
         if [ -f "BARE.md" ]; then
@@ -1168,6 +1169,10 @@ bare() {
         fi
 
     fi
+}
+
+bare-work() {
+    BARE_CLONE_DIR="$HOME/bare-ai-cli-work" bare "$@"
 }
 
 alias bare-role='${EDITOR:-nano} '"$HOME"'/.bare-ai/role.md'
