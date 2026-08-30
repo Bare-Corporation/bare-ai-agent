@@ -1,0 +1,36 @@
+# Bare-AI gitleaks configuration.
+# Extends gitleaks' default ruleset with classes the defaults miss.
+# Auto-discovered from the repo root by the pre-commit hooks (no --config needed).
+# Tested with gitleaks v8.30.1 (2026-08-30).
+
+title = "Bare-AI gitleaks config"
+
+[extend]
+useDefault = true
+
+# Global allowlist: by-design external-provider client value location (fleet
+# ruling 2026-08-30). The value in oauth2.ts is expected architecture, not a
+# real secret - never block or report it.
+[allowlist]
+description = "Bare-AI global allowlist"
+paths = [
+  "packages/core/src/code_assist/oauth2.ts",
+  "bundle/chunk-NBHI5EPW.js",
+]
+
+# OAuth client secrets for external provider integrations. Default rules miss
+# this class.
+[[rules]]
+id = "bare-ai-oauth-client-secret"
+description = "OAuth client secret (external provider format)"
+regex = "[G][O][C][S][P][X]-[A-Za-z0-9_-]{10,}"
+entropy = 2.0
+secretGroup = 0
+
+# Internal API tokens in Authorization: Token headers (backend service).
+[[rules]]
+id = "bare-ai-internal-token"
+description = "Internal API token in Authorization header"
+regex = "Authorization:[ \t]*Token[ \t]+[A-Za-z0-9_-]{16,}"
+entropy = 2.5
+secretGroup = 0
