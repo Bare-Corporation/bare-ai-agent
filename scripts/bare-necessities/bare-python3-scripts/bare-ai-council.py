@@ -50,7 +50,7 @@ Environment (optional overrides — Vault is the primary source):
   BARE_COUNCIL_URL      — Override the base URL
 
 Vault path (primary credential source — same pattern as all other cloud models):
-  secret/data/bare-ai-council/config  →  fields: api_key, base_url
+  secret/data/bare-ai-council-v1/config  →  fields: api_key, base_url
 
 PROXY NOTE (Option 2 integration):
   If this script is wrapped by an OpenAI-compatible proxy, the proxy must
@@ -79,7 +79,7 @@ DEFAULT_ROUNDS   = 2
 DEFAULT_TIMEOUT  = 600   # 10 min ceiling
 DEFAULT_POLL     = 10    # seconds between status checks
 
-VAULT_SECRET_PATH = "secret/data/bare-ai-council/config"
+VAULT_SECRET_PATH = "secret/data/bare-ai-council-v1/config"
 
 # ── Vault Helpers ─────────────────────────────────────────────────────────────
 
@@ -142,12 +142,12 @@ def resolve_council_config() -> tuple[str, str]:
     Priority:
       1. BARE_COUNCIL_API_KEY env var — explicit override, skips Vault entirely.
          Use for CI, cron, or manual testing only.
-      2. Vault at secret/data/bare-ai-council/config — the primary source,
+      2. Vault at secret/data/bare-ai-council-v1/config — the primary source,
          retrieved via AppRole exactly like every other cloud model key.
 
     Exits with a clear, actionable error message if neither source has a key.
     Purchase a Council API key at https://bare-ai.net then store it with:
-      vault kv put secret/bare-ai-council/config \\
+      vault kv put secret/bare-ai-council-v1/config \\
         api_key='<your-key>' \\
         base_url='https://api.bare-ai.net/v1/council'
     """
@@ -185,11 +185,16 @@ def resolve_council_config() -> tuple[str, str]:
             api_key  = secret_data.get("api_key", "")
             base_url = secret_data.get("base_url", DEFAULT_BASE_URL)
 
+            # Normalize base_url: Vault may hold https://api.bare-ai.net/v1
+            # (without the /council suffix). Broken URLs must not reach the API.
+            if not base_url.endswith("/v1/council"):
+                base_url = DEFAULT_BASE_URL
+
             if not api_key or api_key == "enterYourKey":
                 print(
                     "[council] ERROR: Council API key not configured in Vault.\n"
                     "Purchase a key at https://bare-ai.net then run:\n"
-                    "  vault kv put secret/bare-ai-council/config \\\n"
+                    "  vault kv put secret/bare-ai-council-v1/config \\\n"
                     "    api_key='<your-key>' \\\n"
                     "    base_url='https://api.bare-ai.net/v1/council'",
                     file=sys.stderr
@@ -203,7 +208,7 @@ def resolve_council_config() -> tuple[str, str]:
             print(
                 f"[council] ERROR: {VAULT_SECRET_PATH} not found in Vault.\n"
                 "Purchase a key at https://bare-ai.net then run:\n"
-                "  vault kv put secret/bare-ai-council/config \\\n"
+                "  vault kv put secret/bare-ai-council-v1/config \\\n"
                 "    api_key='<your-key>' \\\n"
                 "    base_url='https://api.bare-ai.net/v1/council'",
                 file=sys.stderr
