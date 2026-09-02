@@ -47,6 +47,14 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# --- UNIFIED CLI PROFILE MAPPING ---
+# One CLI, endpoint-driven dialect. Tier pro -> native Anthropic Messages
+# (+ prompt caching); anything else (me/free) -> OpenAI-spec council default.
+case "$TIER" in
+    pro) CLI_PROFILE="pro" ;;
+    *)   CLI_PROFILE="me" ;;
+esac
+
 # --- DOCKER / Podman WARNING ---
 if [ ! -f "/.dockerenv" ]; then
     echo -e "${YELLOW}Warning: Running on host system. For enhanced security, Bare-ERP recommends running within Docker or Podman.${NC}"
@@ -1166,6 +1174,22 @@ fi
 #####################################################
 #####################################################
 
+# --- 10.1 WRITE UNIFIED CLI PROFILE ---
+# Write the tier-matched endpoint profile for the unified bare-ai CLI
+# (canonical script lives in bare-ai-cli main). Non-fatal on failure.
+if command -v curl >/dev/null 2>&1; then
+    PROFILE_SCRIPT="$TARGET_HOME/.bare-ai/install-profile.sh.tmp"
+    mkdir -p "$TARGET_HOME/.bare-ai"
+    if curl -fsSL -o "$PROFILE_SCRIPT" https://raw.githubusercontent.com/Bare-Corporation/bare-ai-cli/main/scripts/install-profile.sh; then
+        if BARE_AI_HOME="$TARGET_HOME/.bare-ai" bash "$PROFILE_SCRIPT" "$CLI_PROFILE"; then
+            echo -e "${GREEN}✓ Unified CLI profile written: $CLI_PROFILE${NC}"
+        else
+            echo -e "${YELLOW}⚠️ Could not write CLI profile (non-fatal)${NC}"
+        fi
+        rm -f "$PROFILE_SCRIPT"
+    fi
+fi
+
 # --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
@@ -1175,7 +1199,7 @@ echo -e "${YELLOW} for:${NC}"
 echo -e "${YELLOW} www.bare-ai.net${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${YELLOW} FREE VERSION: www.bare-ai.me${NC}"
-echo -e "${YELLOW} PRO VERSION:www.bare-ai.pro (coming soon)${NC}"
+echo -e "${YELLOW} PRO VERSION: www.bare-ai.pro${NC}"
 echo -e "${YELLOW} ENTERPRISE VERSION: www.bare-ai.biz (est Q4 2026)${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 
