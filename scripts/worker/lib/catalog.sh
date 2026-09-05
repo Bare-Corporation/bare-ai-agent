@@ -30,7 +30,13 @@ FALLBACK_JSON
 catalog_fetch() {
   mkdir -p "$(dirname "$CATALOG_CACHE")"
   local tmp="${CATALOG_CACHE}.tmp.$$"
-  if curl -s -k --max-time 8 "${COUNCIL_API_BASE_URL}/v1/models" -o "$tmp" 2>/dev/null; then
+  # Optional usage tracking: per-install AGENT_ID (agent.env). Absent/empty
+  # -> no header; never hard-fails.
+  local agent_hdr=()
+  if [ -n "${AGENT_ID:-}" ]; then
+    agent_hdr=(-H "X-Agent-Id: $AGENT_ID")
+  fi
+  if curl -s -k --max-time 8 "${agent_hdr[@]}" "${COUNCIL_API_BASE_URL}/v1/models" -o "$tmp" 2>/dev/null; then
     # validate it parses and has models
     if jq -e '.models | length > 0' "$tmp" >/dev/null 2>&1; then
       mv -f "$tmp" "$CATALOG_CACHE"
