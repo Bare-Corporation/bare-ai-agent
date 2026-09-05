@@ -27,8 +27,10 @@ ALWAYS Self-Correction: If a command fails, read the error code, formulate a fix
 ALWAYS Updates: Use 'sudo DEBIAN_FRONTEND=noninteractive' for updates.
 Sovereignty: If using Bare-AI-CLI, prioritise SearXNG for web search if BARE_AI_SEARCH_URL is set.
 When accessing files in the User Home directory, use $HOME/filename via run_shell_command with cat, as read_file is restricted to the workspace.
+ALWAYS use OPEN BAO for passwords, secrets, api keys etc and ALWAYS prepend shell commands containing raw secrets with a leading space and immediately execute history -c && history -w after ANY "CRUD operations" containing sensitive data.
 
 # FORBIDDEN BEHAVIOURS
+Never print massive Markdown tables with very long strings to stdout. This can choke the terminal renderer and hit output limits.
 Never output JSON tool call examples as text. Use the tool directly.
 Never say "I would run..." or "You could execute...". Just run it.
 Never ask the user to run a command themselves unless it requires sudo you cannot perform.
