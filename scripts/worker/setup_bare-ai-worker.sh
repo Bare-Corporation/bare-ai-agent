@@ -131,7 +131,7 @@ execute_command() {
 
 # --- CORE TOOLING ---
 echo -e "${YELLOW}Installing core system tools...${NC}"
-execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq jq curl wget" "Install core networking and JSON tools"
+execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq jq curl wget openssl" "Install core networking, JSON and TLS tools"
 
 # i. Define the directory and the actual file
 CONFIG_DIR="$TARGET_HOME/.bare-ai/config"
@@ -443,6 +443,130 @@ export VAULT_ADDR="$FINAL_VAULT_ADDR"
 export VAULT_ROLE_ID="$AGENT_ROLE_ID"
 export VAULT_SECRET_ID="$AGENT_SECRET_ID"
 EOF
+
+# --- 1b-ii. VAULT CA TRUST (turn-key TLS trust for NON-interactive shells) ---
+# A freshly provisioned worker must be able to reach Vault from cron, systemd
+# and the M2M bus — not only from an interactive login shell. The trust anchor
+# is therefore written to a fixed on-disk path that the CLI loads in-process,
+# instead of being exported from ~/.bashrc (which only ever reaches interactive
+# shells, and is exactly how the last outage hid).
+VAULT_CA_DIR="$TARGET_HOME/.bare-ai/ca"
+VAULT_CA_FILE="$VAULT_CA_DIR/vault-ca.crt"
+
+ensure_vault_ca_trust() {
+    # Idempotent + fail-closed: returns 0 only when a usable anchor is on disk.
+    if [ -s "$VAULT_CA_FILE" ] && openssl x509 -in "$VAULT_CA_FILE" -noout > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Vault CA already present at $VAULT_CA_FILE — leaving it untouched${NC}"
+        return 0
+    fi
+
+    if [ -e "$VAULT_CA_FILE" ]; then
+        echo -e "${RED}❌ $VAULT_CA_FILE exists but is not a valid PEM certificate.${NC}"
+        echo -e "${YELLOW}Expected a Vault trust anchor at: $VAULT_CA_FILE${NC}"
+        echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+        echo -e "${YELLOW}Move the corrupt file aside and re-run this installer, or restore the correct CA at that path.${NC}"
+        exit 1
+    fi
+
+    if [[ "$FINAL_VAULT_ADDR" != https://* ]]; then
+        # Local OpenBao installs run with tls_disable = 1, so there is no anchor to fetch.
+        echo -e "${GREEN}✓ Vault CA not required — $FINAL_VAULT_ADDR is plain HTTP${NC}"
+        return 0
+    fi
+
+    if ! command -v openssl > /dev/null 2>&1; then
+        echo -e "${RED}❌ openssl is required to obtain the Vault CA, but it is not installed.${NC}"
+        echo -e "${YELLOW}Expected a Vault trust anchor at: $VAULT_CA_FILE${NC}"
+        echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+        echo -e "${YELLOW}Install openssl (sudo apt-get install -y openssl) and re-run this installer.${NC}"
+        exit 1
+    fi
+
+    # Read the public certificate chain Vault presents during the TLS handshake.
+    # This makes no access attempt and disables no verification anywhere: the
+    # anchor is bootstrapped out-of-band from the handshake itself, so no new
+    # TLS bypass is introduced (unlike the legacy 'curl -k' health probes).
+    local hostport="${FINAL_VAULT_ADDR#https://}"
+    hostport="${hostport%%/*}"
+    local host="${hostport%%:*}"
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local chain_raw="$tmp_dir/chain.raw.pem"
+    local chain_pem="$tmp_dir/chain.pem"
+
+    if ! openssl s_client -connect "$hostport" -servername "$host" -showcerts < /dev/null > "$chain_raw" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        echo -e "${RED}❌ Could not complete a TLS handshake with $hostport to obtain the Vault CA.${NC}"
+        echo -e "${YELLOW}Expected a Vault trust anchor at: $VAULT_CA_FILE${NC}"
+        echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+        exit 1
+    fi
+
+    awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' "$chain_raw" > "$chain_pem"
+    local cert_count
+    cert_count="$(grep -c -- '-----BEGIN CERTIFICATE-----' "$chain_pem" || true)"
+
+    if [ "${cert_count:-0}" -eq 0 ]; then
+        rm -rf "$tmp_dir"
+        echo -e "${RED}❌ $hostport presented no certificate chain — cannot obtain the Vault CA.${NC}"
+        echo -e "${YELLOW}Expected a Vault trust anchor at: $VAULT_CA_FILE${NC}"
+        echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+        exit 1
+    fi
+
+    # A single certificate must be self-signed to act as its own anchor; for a
+    # full chain the root-most (last presented) certificate is the anchor.
+    local anchor_index="$cert_count"
+    if [ "$cert_count" -eq 1 ]; then
+        local subject issuer
+        subject="$(openssl x509 -in "$chain_pem" -noout -subject)"
+        issuer="$(openssl x509 -in "$chain_pem" -noout -issuer)"
+        if [ "${subject#subject=}" != "${issuer#issuer=}" ]; then
+            rm -rf "$tmp_dir"
+            echo -e "${RED}❌ $hostport presented a single non-self-signed certificate — no trust anchor can be derived from it.${NC}"
+            echo -e "${YELLOW}Expected a Vault trust anchor at: $VAULT_CA_FILE${NC}"
+            echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+            echo -e "${YELLOW}Obtain the issuing CA from your Vault operator, place it at the path above, and re-run this installer.${NC}"
+            exit 1
+        fi
+    fi
+
+    local anchor="$tmp_dir/anchor.pem"
+    awk -v want="$anchor_index" '/-----BEGIN CERTIFICATE-----/{n++} n==want{print}' "$chain_pem" > "$anchor"
+
+    if ! openssl x509 -in "$anchor" -noout > /dev/null 2>&1; then
+        rm -rf "$tmp_dir"
+        echo -e "${RED}❌ The certificate derived from $hostport is not a valid PEM certificate.${NC}"
+        echo -e "${YELLOW}Expected a Vault trust anchor at: $VAULT_CA_FILE${NC}"
+        echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+        exit 1
+    fi
+
+    execute_command "mkdir -p -m 0755 \"$VAULT_CA_DIR\"" "Create Vault CA directory"
+
+    # Atomic publish: stage in the destination directory, then rename into place
+    # so a concurrent reader can never observe a half-written anchor.
+    local staged
+    staged="$(mktemp "$VAULT_CA_DIR/.vault-ca.crt.XXXXXX")"
+    cp "$anchor" "$staged"
+    chmod 0644 "$staged"
+    mv "$staged" "$VAULT_CA_FILE"
+
+    rm -rf "$tmp_dir"
+
+    if ! openssl x509 -in "$VAULT_CA_FILE" -noout -subject > /dev/null 2>&1; then
+        echo -e "${RED}❌ Published Vault CA at $VAULT_CA_FILE failed verification.${NC}"
+        echo -e "${YELLOW}Consequence: Vault TLS verification fails for every non-interactive agent call (cron, systemd, M2M bus).${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✓ Vault CA written to $VAULT_CA_FILE${NC}"
+    echo -e "  Subject: $(openssl x509 -in "$VAULT_CA_FILE" -noout -subject)"
+    echo -e "  SHA256:  $(openssl x509 -in "$VAULT_CA_FILE" -noout -fingerprint -sha256 | cut -d= -f2)"
+    return 0
+}
+
+ensure_vault_ca_trust
 
 # --- 1c. SOVEREIGN SEARCH SETUP ---
 echo -e "\n${YELLOW}Checking Search Engine configuration...${NC}"
