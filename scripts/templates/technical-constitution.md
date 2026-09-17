@@ -260,7 +260,7 @@ Applies to: bare-ai CLI (all sessions, all VMs)
 
 Q1. What is the maximum safe prompt length?
 
-2,000 characters.
+30,000 characters.
 
 Prompts exceeding this limit will cause one of three failure modes depending on content:
 
@@ -271,7 +271,7 @@ Prompts exceeding this limit will cause one of three failure modes depending on 
 | Shell parse error | `-bash: command not found` on every line | Output pasted back into terminal |
 
 
-Q2. What counts toward the 2,000 character limit?
+Q2. What counts toward the 30,000 character limit?
 
 Everything in the message sent to bare-ai counts: instruction text, code blocks, bash commands, comments, whitespace, and newlines. The limit applies to the total prompt, not just the code portion.
 
