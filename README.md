@@ -104,6 +104,10 @@ The chosen engine's endpoint is written to `BARE_AI_ENDPOINT` in
   resource audits.
 - Persistent session diary for context continuity across sessions.
 - AST-based code mapping for navigating large codebases.
+- Catalog-driven model menu (Sovereign Switchboard) for hot-swapping models.
+- Multi-model Council orchestration (`council.py`) for cross-model deliberation.
+- Stage-separated CSV todo system for task tracking.
+- Self-learning role — durable lessons persist to `role.md` across sessions.
 
 ---
 
@@ -149,16 +153,16 @@ secret with a real key:
 
 ```bash
 # OpenAI example
-bao kv patch secret/gpt-5.5/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+bao kv patch secret/data/openai/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
 
 # Anthropic example
-bao kv patch secret/claude-sonnet-4-6/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+bao kv patch secret/data/claude/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
 
 # DeepSeek example
-bao kv patch secret/deepseek-v4-pro/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
+bao kv patch secret/data/deepseek/config api_key="YOUR_REAL_KEY_STARTS_WITH:sk"
 ```
 
-The exact secret path for each model is shown in the Sovereign Switchboard menu,
+The exact secret path for each provider is shown in the Sovereign Switchboard menu,
 between square brackets (`[modelName]`).
 
 ### Unsealing after reboot
@@ -211,12 +215,19 @@ deployed separately from this project.
 
 The installer deploys global symlinks for deterministic host management:
 
-| Alias | Function | Target |
+| Alias | Function | Notes |
 | --- | --- | --- |
 | `cpu-temp` | Thermal audit | Tctl/Tdie priority |
+| `disk-health` | Storage audit | Array / disk health |
+| `net-audit` | Network audit | Interface state |
 | `pve-check` | Resource monitor | Proxmox VM/CT |
+| `error-log` | Log scanner | Failure triage |
+| `grep_search` | Large-file search | Fast pattern matching |
 | `ai-monitor` | Memory pressure | RAM/VRAM |
 | `code-map` | AST mapping | Code analysis |
+| `pve-json` | Proxmox JSON bridge | Proxmox nodes |
+| `council.py` | Multi-model Council | Deliberated consensus |
+| `todo` | Task manager | 6-stage CSV system |
 
 ---
 
@@ -259,6 +270,12 @@ bare-uninstall
 
 # Launch with a specific model (bypass the switchboard)
 bare <LLMName>
+
+# Set the agent role (persona + functional scope)
+bare-role
+
+# Update without overwriting Vault secrets (Pro deployments)
+bare-update-pro
 ```
 
 Session logs are written to `~/bare-necessities-workspace/bare-ai-diary/YYYY-MM-DD.md` with engine tagging.
