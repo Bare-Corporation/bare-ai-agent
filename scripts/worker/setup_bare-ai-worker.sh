@@ -1188,10 +1188,14 @@ bare() {
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
 
         # --- DYNAMIC IDENTITY & CONTEXT INJECTION ---
-        # Built as a shell variable only — never written to any file inside
-        # bare-ai-cli/, so this can never collide with bare-ai-cli's own
-        # native BARE_AI.md project-memory file, and never risks blocking
-        # 'git pull' / 'bare-update'.
+        # The combined role + technical constitution prompt is handed to the
+        # CLI as a FILE, never as an environment string. Role plus
+        # constitution can exceed the kernel's 128 KiB MAX_ARG_STRLEN limit
+        # for one exec argument, and passing them through the environment made
+        # the engine launch fail with E2BIG. The file sits on a private
+        # per-user tmpfs outside bare-ai-cli/, so it can never collide with
+        # bare-ai-cli's own native BARE_AI.md project-memory file, and never
+        # risks blocking 'git pull' / 'bare-update'.
         local combined_const=""
 
         # 1. Role Constitution FIRST — must appear above the shield marker
@@ -1211,7 +1215,35 @@ bare() {
             combined_const="${combined_const}***CRITICAL CONTEXT***: Everything above the marker \"🛡️ ${SHIELD_MARKER}\" is your Primary Agent Identity. You are currently operating in pure reasoning and chat mode — system tools and workspace execution are disabled for this session."$'\n\n'
         fi
 
-        export BARE_AI_SYSTEM_PROMPT="$combined_const"
+        # --- FILE-BASED PROMPT HANDOFF (E2BIG fix) ---
+        # Write the combined prompt to a private per-user tmpfs file and pass
+        # only its PATH to the CLI. printf '%s' (never echo) keeps
+        # backslashes, '%' sequences and leading dashes byte-for-byte intact.
+        local PROMPT_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        if [ ! -d "$PROMPT_DIR" ] || [ ! -w "$PROMPT_DIR" ]; then
+            # No session runtime dir (systemd-less host, sudo -i, cron context):
+            # degrade to a private 0700 directory under $HOME rather than fail.
+            PROMPT_DIR="$HOME/.bare-ai/run"
+            mkdir -p "$PROMPT_DIR"
+            chmod 700 "$PROMPT_DIR"
+        fi
+        local PROMPT_FILE="$PROMPT_DIR/bare_prompt.md"
+        local PROMPT_OK=0
+        if touch "$PROMPT_FILE" && chmod 600 "$PROMPT_FILE"; then
+            if printf '%s' "$combined_const" > "$PROMPT_FILE"; then
+                PROMPT_OK=1
+            fi
+        fi
+        if [ "$PROMPT_OK" -eq 1 ]; then
+            export BARE_AI_SYSTEM_PROMPT_FILE="$PROMPT_FILE"
+        else
+            echo -e "\033[0;31m[bare-ai] CRITICAL: could not write the prompt handoff file at $PROMPT_FILE. Aborting.\033[0m"
+            return 1
+        fi
+        # The legacy in-environment copy is deliberately NOT exported: it is the
+        # value that blew the per-argument exec limit, and a stale inherited one
+        # would otherwise shadow the file.
+        unset BARE_AI_SYSTEM_PROMPT
         export BARE_AI_MODEL="$MODEL"
 
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
@@ -1219,7 +1251,28 @@ bare() {
         # --- BARE-AI ENGINE PRE-FLIGHT CHECK ---
         if [[ "$MODEL" =~ ^(deepseek|gemma|qwen|llama|mistral|granite) ]]; then
             if command -v ollama &>/dev/null; then
-                if ! ollama list | grep -q "${MODEL}"; then
+                # Probe 'ollama list' SEPARATELY from the model match. Piping it
+                # straight into grep hides a failed probe behind grep's exit
+                # status, which is how an exec failure (E2BIG from an oversized
+                # environment, or the daemon being down) got misreported as
+                # "weights are missing" and sent the operator off to re-pull a
+                # model that was already installed.
+                # 'ollama list' exits 0 even when the requested model is absent,
+                # so a non-zero status always means the PROBE itself failed.
+                local OLLAMA_OUT=""
+                local OLLAMA_RC=0
+                OLLAMA_OUT="$(ollama list 2>&1)" || OLLAMA_RC=$?
+                if [ "$OLLAMA_RC" -ne 0 ]; then
+                    echo ""
+                    echo -e "\033[0;31m[bare-ai] Pre-flight could not run: 'ollama list' failed (exit ${OLLAMA_RC}).\033[0m"
+                    echo -e "\033[1;33m   This is a system-level failure, NOT a missing model, so nothing will be pulled.\033[0m"
+                    echo -e "\033[1;33m   Raw error from the command:\033[0m"
+                    printf '%s' "$OLLAMA_OUT" | sed 's/^/     /'
+                    echo ""
+                    echo -e "\033[1;33m   Fix the above, then re-run: bare ${MODEL}\033[0m"
+                    return 1
+                fi
+                if ! printf '%s' "$OLLAMA_OUT" | grep -qF -- "${MODEL}"; then
                     echo -e "\n\033[1;33m[sovereign] Sovereign Engine '$MODEL' is missing its neural weights.\033[0m"
                     read -rp "Would you like to auto-install it via Ollama now? (May take a few minutes) [y/N]: " PULL_CHOICE
                     if [[ "$PULL_CHOICE" =~ ^[Yy]$ ]]; then
