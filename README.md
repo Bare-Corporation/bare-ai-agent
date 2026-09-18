@@ -108,6 +108,7 @@ The chosen engine's endpoint is written to `BARE_AI_ENDPOINT` in
 - Multi-model Council orchestration (`council.py`) for cross-model deliberation.
 - Stage-separated CSV todo system for task tracking.
 - Self-learning role — durable lessons persist to `role.md` across sessions.
+- Optional vision / browser tier via `bare-ai-agent-visual` (Playwright + Chromium) for UI rendering and screenshots.
 
 ---
 
@@ -337,6 +338,15 @@ sudo rm -rf /opt/openbao/data/*
 ```
 
 ---
+
+## Vision / browser tier (bare-ai-agent-visual)
+
+The lean fleet deliberately ships no headless browser. For rendering pages,
+capturing screenshots, or visually inspecting UI output, use the specialized
+[bare-ai-agent-visual](https://github.com/Bare-Corporation/bare-ai-agent-visual)
+repo, which layers Playwright + Chromium onto the base image. It is intended
+only for frontend/UI nodes, keeping Chromium's attack surface off backend and
+security nodes.
 
 ## Sovereign Brain (Coordinator)
 
