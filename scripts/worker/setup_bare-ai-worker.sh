@@ -27,13 +27,9 @@ YELLOW="\033[1;33m"
 RED="\033[0;31m"
 NC="\033[0m"
 
-# --- SUDO KEEP-ALIVE ---
-echo -e "${YELLOW}Requesting sudo access upfront to prevent installation hangs...${NC}"
-sudo -v
-# Keep-alive: update existing sudo time stamp if set, until script has finished
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
-
 # --- ARGUMENT PARSING ---
+# Parsed BEFORE anything can ask for root, because --fast has to be known before
+# the script decides whether it needs sudo at all.
 FAST_UPDATE=false
 TIER="free" # Default to free tier
 PRO_MODE=false
@@ -46,6 +42,23 @@ while [[ "$#" -gt 0 ]]; do
     esac
     shift
 done
+
+# --- SUDO KEEP-ALIVE (FULL INSTALLS ONLY) ---
+# WHY THIS IS GATED: 'bare-update' invokes this script with --fast. A fast update
+# only rewrites user-space files (~/.bashrc, ~/.bare-ai/, the agent workspace), so
+# it must never need root. The unconditional 'sudo -v' that used to run here made
+# every unattended M2M update block on a password prompt that nothing could
+# answer — the update then failed with no visible cause. In fast mode the
+# credential prompt is skipped entirely and every system-level step below is
+# skipped with a notice instead of being attempted.
+if [ "$FAST_UPDATE" = true ]; then
+    echo -e "${GREEN}FAST MODE: user-space update only — sudo, system packages and services are left untouched.${NC}"
+else
+    echo -e "${YELLOW}Requesting sudo access upfront to prevent installation hangs...${NC}"
+    sudo -v
+    # Keep-alive: update existing sudo time stamp if set, until script has finished
+    while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+fi
 
 # --- UNIFIED CLI PROFILE MAPPING ---
 # One CLI, endpoint-driven dialect. Tier pro -> native Anthropic Messages
@@ -129,9 +142,30 @@ execute_command() {
     echo -e "${GREEN}✓ Done${NC}"
 }
 
+# --- HELPER: system_step ---
+# Runs a step that needs root, unless this is a --fast user-space update.
+# Fast mode must never call sudo, so the step is reported and skipped rather
+# than silently dropped: an operator reading the log can see exactly which
+# system-level work a fast update deliberately did not do.
+system_step() {
+    local cmd="$1"
+    local description="${2:-System step}"
+
+    if [ "$FAST_UPDATE" = true ]; then
+        echo -e "${YELLOW}[fast] Skipping system step: ${description}${NC}"
+        return 0
+    fi
+
+    execute_command "$cmd" "$description"
+}
+
 # --- CORE TOOLING ---
-echo -e "${YELLOW}Installing core system tools...${NC}"
-execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq jq curl wget openssl" "Install core networking, JSON and TLS tools"
+if [ "$FAST_UPDATE" = true ]; then
+    echo -e "${YELLOW}FAST MODE: skipping system package installation (jq, curl, wget and openssl must already be present).${NC}"
+else
+    echo -e "${YELLOW}Installing core system tools...${NC}"
+    execute_command "sudo apt-get update -qq && sudo apt-get install -y -qq jq curl wget openssl" "Install core networking, JSON and TLS tools"
+fi
 
 # i. Define the directory and the actual file
 CONFIG_DIR="$TARGET_HOME/.bare-ai/config"
@@ -186,6 +220,24 @@ AGENT_ROLE_ID="your-role-id-here"
 AGENT_SECRET_ID="your-secret-id-here"
 SKIP_VAULT_ADMIN=false
 
+# --- FAST MODE GATE: VAULT (1b) ---
+# A fast update must not prompt, reconfigure Vault or leave the local user's
+# credentials behind: it loads whatever is already in vault.env so the rest of
+# the script still has an address and credentials, and then skips the whole
+# pre-flight/installation/admin path below. vault.env itself is NOT rewritten in
+# fast mode, so existing Role ID / Secret ID values survive every update.
+if [ "$FAST_UPDATE" = true ]; then
+    echo -e "${YELLOW}FAST MODE: skipping Vault configuration and installation; existing vault.env left untouched.${NC}"
+    if [ -f "$VAULT_ENV_FILE" ]; then
+        . "$VAULT_ENV_FILE"
+        FINAL_VAULT_ADDR="${VAULT_ADDR:-$FINAL_VAULT_ADDR}"
+        AGENT_ROLE_ID="${VAULT_ROLE_ID:-$AGENT_ROLE_ID}"
+        AGENT_SECRET_ID="${VAULT_SECRET_ID:-$AGENT_SECRET_ID}"
+    else
+        echo -e "${YELLOW}FAST MODE: no vault.env found — leaving Vault unconfigured (run a full install to set it up).${NC}"
+    fi
+    SKIP_VAULT_ADMIN=true
+else
 PRO_VAULT_REUSE=false
 if [ "$PRO_MODE" = "true" ] && [ -f "$VAULT_ENV_FILE" ]; then
     . "$VAULT_ENV_FILE"
@@ -443,6 +495,8 @@ export VAULT_ADDR="$FINAL_VAULT_ADDR"
 export VAULT_ROLE_ID="$AGENT_ROLE_ID"
 export VAULT_SECRET_ID="$AGENT_SECRET_ID"
 EOF
+fi
+# --- end FAST MODE GATE: VAULT (1b) ---
 
 # --- 1b-ii. VAULT CA TRUST (turn-key TLS trust for NON-interactive shells) ---
 # A freshly provisioned worker must be able to reach Vault from cron, systemd
@@ -568,6 +622,12 @@ ensure_vault_ca_trust() {
 
 ensure_vault_ca_trust
 
+# --- FAST MODE GATE: SEARCH (1c) ---
+# Install-time decision only. Re-running it in fast mode would re-prompt (and
+# hang an unattended update) and could re-point an already-configured agent.
+if [ "$FAST_UPDATE" = true ]; then
+    echo -e "${YELLOW}FAST MODE: skipping search-engine configuration (agent.env left as-is).${NC}"
+else
 # --- 1c. SOVEREIGN SEARCH SETUP ---
 echo -e "\n${YELLOW}Checking Search Engine configuration...${NC}"
 read -rp "Do you have an existing Sovereign Search Engine (e.g., SearXNG)? [y/N/1/0]: " HAS_SEARCH
@@ -613,11 +673,18 @@ else
         echo -e "${YELLOW}⚠️ No local search configured. Defaulting to standard search providers.${NC}"
     fi
 fi
+fi
+# --- end FAST MODE GATE: SEARCH (1c) ---
 
 #####################################################
 #####################################################
 #####################################################
 
+# --- FAST MODE GATE: INFERENCE (1d) ---
+# Install-time decision only (engine choice, IP advertisement, model pulls).
+if [ "$FAST_UPDATE" = true ]; then
+    echo -e "${YELLOW}FAST MODE: skipping inference-engine setup.${NC}"
+else
 # --- 1d. SOVEREIGN INFERENCE ENGINE SETUP ---
 # bare-ai-cli speaks native OpenAI-compatible endpoints. Offer a choice of
 # sovereign inference engine (both MIT-licensed):
@@ -802,6 +869,8 @@ if [ -n "$INFERENCE_ENDPOINT" ]; then
     echo "# Sovereign Inference Override" >> "$CONFIG_FILE"
     echo "export BARE_AI_ENDPOINT="$INFERENCE_ENDPOINT"" >> "$CONFIG_FILE"
 fi
+fi
+# --- end FAST MODE GATE: INFERENCE (1d) ---
 
 
 # --- 2. ENGINE INSTALLATION ---
@@ -911,20 +980,20 @@ if [ -d "$BARE_NECESSITIES_DIR" ]; then
     echo -e "${YELLOW}Creating global symlinks in /usr/local/bin pointing to jail...${NC}"
     
     # Bash tools
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp.sh" "Symlink cpu-temp.sh"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check.sh" "Symlink pve-check.sh"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health.sh" "Symlink disk-health.sh"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit.sh" "Symlink net-audit.sh"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log.sh" "Symlink error-log.sh"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/grep_search.sh\" /usr/local/bin/grep_search" "Symlink grep_search"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/bare-thermal-guard.sh\" /usr/local/bin/bare-thermal-guard" "Symlink Thermal Guard"
-    sudo chmod +x "$CLI_SCRIPTS_DIR/bare-bash-scripts/bare-thermal-guard.sh"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/cpu-temp.sh\" /usr/local/bin/cpu-temp.sh" "Symlink cpu-temp.sh"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/pve-check.sh\" /usr/local/bin/pve-check.sh" "Symlink pve-check.sh"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/disk-health.sh\" /usr/local/bin/disk-health.sh" "Symlink disk-health.sh"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/net-audit.sh\" /usr/local/bin/net-audit.sh" "Symlink net-audit.sh"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/error-log.sh\" /usr/local/bin/error-log.sh" "Symlink error-log.sh"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/grep_search.sh\" /usr/local/bin/grep_search" "Symlink grep_search"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-bash-scripts/bare-thermal-guard.sh\" /usr/local/bin/bare-thermal-guard" "Symlink Thermal Guard"
+    system_step 'sudo chmod +x "$CLI_SCRIPTS_DIR/bare-bash-scripts/bare-thermal-guard.sh"' "Make Thermal Guard executable"
 
     # Python tools
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor.py" "Symlink ai-monitor.py"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map.py" "Symlink code-map.py"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json.py" "Symlink pve-json.py"
-    execute_command "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-council.py\" /usr/local/bin/council.py" "Symlink council.py"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-monitor.py\" /usr/local/bin/ai-monitor.py" "Symlink ai-monitor.py"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-code-map.py\" /usr/local/bin/code-map.py" "Symlink code-map.py"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-pve-json-bridge.py\" /usr/local/bin/pve-json.py" "Symlink pve-json.py"
+    system_step "sudo ln -sf \"$CLI_SCRIPTS_DIR/bare-python3-scripts/bare-ai-council.py\" /usr/local/bin/council.py" "Symlink council.py"
 
     echo -e "${GREEN}✓ bare-necessities deployed and jailed successfully${NC}"
 else
@@ -947,7 +1016,7 @@ if [ -d "$TODO_SRC_DIR" ]; then
     for stage in not_started in_progress issue on_hold completed withdrawn; do
         [ -f "$TODO_DEST_DIR/$stage.csv" ] || cp -f "$TODO_SRC_DIR/$stage.csv" "$TODO_DEST_DIR/$stage.csv"
     done
-    sudo ln -sf "$TODO_DEST_DIR/todo.py" /usr/local/bin/todo
+    system_step 'sudo ln -sf "$TODO_DEST_DIR/todo.py" /usr/local/bin/todo' "Symlink the todo manager into /usr/local/bin"
     echo -e "${GREEN}✓ todo system deployed at $TODO_DEST_DIR${NC}"
 else
     echo -e "${YELLOW}⚠️ todo source not found at $TODO_SRC_DIR. Skipping todo deployment.${NC}"
@@ -971,7 +1040,9 @@ fi
 #####################################################
 #####################################################
 # --- 4b. AGENT AUTONOMY PERMISSIONS (Sudoers Patch), but only if not already root ---
-if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+if [ "$FAST_UPDATE" = true ]; then
+    echo -e "${YELLOW}FAST MODE: skipping the sudoers patch (no system files are modified).${NC}"
+elif [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
     echo -e "${YELLOW}Granting limited NOPASSWD sudo rights to $TARGET_USER for self-healing...${NC}"
     sudo tee /etc/sudoers.d/bare-ai-autonomy > /dev/null <<EOF
 $TARGET_USER ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/systemctl, /usr/bin/docker
@@ -1343,7 +1414,7 @@ if command -v crontab &>/dev/null; then
     echo -e "${GREEN}✓ Thermal heartbeat scheduled${NC}"
 else
     echo -e "${YELLOW}⚠️ crontab not found — installing...${NC}"
-    sudo apt-get install -y -qq cron 2>/dev/null && \
+    if [ "$FAST_UPDATE" = true ]; then echo -e "${YELLOW}FAST MODE: skipping cron install (no system packages in fast mode).${NC}"; else sudo apt-get install -y -qq cron 2>/dev/null || true; fi && \
     ( (crontab -l 2>/dev/null | grep -v "bare-thermal-guard") || true; echo "* * * * * /usr/local/bin/bare-thermal-guard" ) | crontab - || true
 fi
 
