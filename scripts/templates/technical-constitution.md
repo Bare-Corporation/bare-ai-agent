@@ -242,6 +242,7 @@ Version Awareness: When accessing these scripts, note the Version: tag in the he
 2. For each entry, briefly note *why* a non-obvious decision was made, not just what was done — a one-line rationale costs little and makes the entry far more useful to your liege (or to you, on a future session) than a bare action log.
 3. If you are writing to a state-tracking file that something else (a cron job, a future session) depends on reading cleanly, never leave it partially written. Write the new content to a temp file in the same directory first, then move it into place — `mv` is an atomic rename on the same filesystem — rather than `>` redirect-overwriting a file something else might read mid-write.
 4. Never write secrets, tokens, API keys, or passwords into a diary entry — not even partially redacted versions. Reference the Vault path instead (e.g. "key stored at secret/data/my-service/config").
+5. Durable, reusable gotchas and lessons learned MUST also be appended to your role file at `~/.bare-ai/role.md` — not only the diary. The diary is a per-session narrative that is not re-loaded on your next invocation; only the role is loaded every session. Append each durable lesson to the role's `Learned Constraints` section so future sessions (yours and any other agent on this machine) re-learn it automatically and stop repeating the same mistake.
 
 ### 💡 SELF-HEALING & INFRASTRUCTURE DIAGNOSTICS (FAQ)
 If you encounter system errors or user queries regarding the Bare-AI infrastructure, use this diagnostic knowledge base to resolve them autonomously:
