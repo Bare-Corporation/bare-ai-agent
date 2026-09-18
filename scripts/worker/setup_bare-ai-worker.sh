@@ -1235,8 +1235,15 @@ bare() {
         echo "Invalid code. Aborting."
         return 1
     fi
+    # The resolved tuple is model_id|tool_capability|is_cloud for local models
+    # and model_id|provider|tool_capability|is_cloud for cloud models, because a
+    # cloud model_id contains a pipe ("deepseek-v4-flash|deepseek-cn"). A
+    # variable-length tuple cannot be indexed from the left: MODEL is still
+    # field 1 (routing depends on that and the local case has no pipe), but the
+    # trailing fields are read from the RIGHT, where is_cloud is always last.
     MODEL="$(printf '%s' "$_resolved" | cut -d'|' -f1)"
-    _tool_cap="$(printf '%s' "$_resolved" | cut -d'|' -f2)"
+    _tool_cap="$(printf '%s' "$_resolved" | awk -F'|' '{print $(NF-1)}')"
+    _is_cloud="$(printf '%s' "$_resolved" | awk -F'|' '{print $NF}')"
         echo -e "\n\033[0;32m✓ Routing to $MODEL...\033[0m\n"
 
         fi
@@ -1342,7 +1349,13 @@ bare() {
         echo -e "\033[0;32m🤖 [Engine: Bare-AI CLI | Model: $MODEL]\033[0m"
 
         # --- BARE-AI ENGINE PRE-FLIGHT CHECK ---
-        if [[ "$MODEL" =~ ^(deepseek|gemma|qwen|llama|mistral|granite) ]]; then
+        # Gate on the catalogue's is_cloud flag, never on a name prefix. Several
+        # cloud models begin with a local engine's name (deepseek-v4-flash,
+        # qwen3.8-max, ...), and the prefix test made them probe a local ollama
+        # that is not running and then HARD-ABORT a launch that never needed it.
+        # Only genuinely local models are probed here. The default is cloud, so
+        # an absent/unknown flag can never block a cloud launch.
+        if [ "${_is_cloud:-true}" != "true" ]; then
             if command -v ollama &>/dev/null; then
                 # Probe 'ollama list' SEPARATELY from the model match. Piping it
                 # straight into grep hides a failed probe behind grep's exit
