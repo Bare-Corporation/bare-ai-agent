@@ -194,6 +194,12 @@ if [ ! -d "$BARE_AI_DIR" ] || [ ! -d "$DIARY_DIR" ] || [ ! -d "$LOG_DIR" ] || [ 
     echo -e "${RED}Error: Failed to create BARE-AI directories. Exiting.${NC}"
     exit 1
 fi
+# Prompt-handoff directory for the bare() launcher: the generated launcher
+# writes the combined role + constitution prompt here at session start (see the
+# FILE-BASED PROMPT HANDOFF block it installs into .bashrc), 0600 inside a
+# private 0700 directory. User-space only, so --fast updates create it too.
+mkdir -p "$BARE_AI_DIR/run"
+chmod 700 "$BARE_AI_DIR/run"
 echo -e "${GREEN}✓ Directory structure created${NC}"
 
 #####################################################
@@ -1153,8 +1159,29 @@ echo -e "${GREEN}✓ Telemetry ping: HTTP $HTTP_CODE${NC}"
 BASHRC_FILE="$TARGET_HOME/.bashrc"
 echo -e "${YELLOW}Updating $BASHRC_FILE...${NC}"
 
-if ! grep -q "BARE-AI PATH" "$BASHRC_FILE"; then
-    cat << 'PATH_EOF' >> "$BASHRC_FILE"
+# Regenerate the managed block instead of skipping it when a marker is found.
+# WHY: the old "already present, skipping" guard meant an UPDATE never refreshed
+# the launcher - so a machine that already had a block kept its old copy, --fast
+# exited 0 with ~/.bashrc untouched, and new launcher behaviour (e.g. the
+# prompt-file handoff) never arrived. Deletion is bounded by the same START/END
+# markers the uninstaller uses, so anything a user added outside them survives.
+BARE_BASHRC_BLOCK_FOUND=false
+if grep -qF "# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:" "$BASHRC_FILE" 2>/dev/null; then
+    BARE_BASHRC_BLOCK_FOUND=true
+    if grep -qF "# END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:" "$BASHRC_FILE"; then
+        sed -i '/^# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:$/,/^# END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:$/d' "$BASHRC_FILE"
+        echo -e "${GREEN}OK: existing BARE-AI block removed from $BASHRC_FILE (regenerating)${NC}"
+    elif grep -qF "alias bare-update-pro=" "$BASHRC_FILE"; then
+        # Block written before the END marker existed: bounded by the last line
+        # that installer ever wrote, so user content after it is preserved.
+        sed -i '/^# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:$/,/^alias bare-update-pro=/d' "$BASHRC_FILE"
+        echo -e "${YELLOW}WARNING: legacy BARE-AI block (no end marker) regenerated${NC}"
+    else
+        echo -e "${YELLOW}WARNING: a BARE-AI block start marker exists with no end marker and no bare-update-pro alias; leaving it untouched and appending a fresh block (the newest definition wins).${NC}"
+    fi
+fi
+
+cat << 'PATH_EOF' >> "$BASHRC_FILE"
 
 # START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 # BARE-AI PATH
@@ -1162,12 +1189,7 @@ if [ -d "$HOME/.bare-ai/bin" ] ; then
     PATH="$HOME/.bare-ai/bin:$PATH"
 fi
 PATH_EOF
-    echo -e "${GREEN}✓ PATH entry added${NC}"
-else
-    echo -e "${YELLOW}⚠️  PATH entry already present, skipping${NC}"
-fi
 
-if ! grep -q "BARE-AI Hybrid Loader" "$BASHRC_FILE"; then
 cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
 
 # BARE-AI Hybrid Loader
@@ -1397,9 +1419,10 @@ alias bare-update='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/se
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
-  echo -e "${GREEN}✓ bare() function added${NC}"
+if [ "$BARE_BASHRC_BLOCK_FOUND" = true ]; then
+    echo -e "${GREEN}OK: bare() launcher refreshed in $BASHRC_FILE${NC}"
 else
-    echo -e "${YELLOW}⚠️  bare() function already present, skipping${NC}"
+    echo -e "${GREEN}OK: bare() launcher installed in $BASHRC_FILE${NC}"
 fi
 
 #####################################################
