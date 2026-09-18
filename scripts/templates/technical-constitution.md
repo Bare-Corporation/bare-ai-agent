@@ -378,6 +378,23 @@ Yes. Avoid these inside inline shell commands:
 | Emoji / Unicode in heredocs | Shell encoding issues | Use Python `print()` instead |
 | `\n` as literal in shell strings | Misinterpreted as escape | Use Python multiline strings |
 
+# VISION / BROWSER CAPABILITY
+
+The lean base fleet intentionally does NOT ship a headless browser. Chromium and
+Playwright carry ~1-1.5 GB of UI-library attack surface that backend/security
+nodes must not inherit.
+
+When a task requires rendering a web page, taking a screenshot, or visually
+inspecting UI output, do NOT install a browser onto the base node. Instead, use
+the specialized repo:
+
+  https://github.com/Bare-Corporation/bare-ai-agent-visual
+
+Clone it (or build/pull its Containerfile image) only on a frontend/UI node that
+actually renders UI, and drive Playwright/Chromium from there. Feed the
+screenshots to a vision-capable model for inspection. Base/backend/security
+nodes stay lean.
+
 #    ____ _                  _ _       _         ____
 #   / ___| | ___   ___  ___| (_)_ __ | |_      / ___|___
 #  | |   | |/ _ \ | | | |/ __| | | '_ \| __|    | |   / _ \
