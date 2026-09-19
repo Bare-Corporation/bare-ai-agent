@@ -1215,9 +1215,6 @@ bare() {
         echo -e "\033[1;33m☎️🤖 000-999 - BARE-AI SOVEREIGN & PREMIUM Switchboard\033[0m"
         echo -e "\033[1;33m=====================================================\033[0m"
 
-        echo -e "\n\033[1;36m=====================================================\033[0m"
-        echo -e "\033[1;36m🔱🤖 000-099 - BARE-AI SOVEREIGN Engine Selection\033[0m"
-        echo -e "\033[1;36m=====================================================\033[0m"
         # ── Catalog-driven menu (single source of truth) ──
         if [ -f "$HOME/.bare-ai/lib/catalog.sh" ]; then
             source "$HOME/.bare-ai/lib/catalog.sh"
