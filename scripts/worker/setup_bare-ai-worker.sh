@@ -1426,6 +1426,7 @@ alias bare-role='${EDITOR:-nano} '"$HOME"'/.bare-ai/role.md'
 alias bare-constitution='cat '"$HOME"'/.bare-ai/technical-constitution.md'
 alias bare-uninstall=''"$HOME"'/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
 alias bare-update='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
+alias bare-update-pro='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro && source ~/.bashrc'
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
@@ -1496,5 +1497,5 @@ echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your age
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< required.)"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "4. ${GREEN}Update:${NC}        bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
-echo -e "5. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
-alias bare-update-pro='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro && source ~/.bashrc'
+echo -e "5. ${GREEN}Update Pro:${NC}    bare-update-pro (<< opt - Same fast update, sets the pro tier.)"
+echo -e "6. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
