@@ -1302,11 +1302,18 @@ bare() {
         fi
 
 
-        # 3. Technical Constitution (contains the shield marker at its start)
+        # 3. Technical constitution: its TEXT reaches the model as the SYSTEM
+        #    instruction, because BARE_AI_CONSTITUTION is exported above and
+        #    bareAiClient reads that file. It is deliberately NOT appended to
+        #    this handoff file (F2): the second copy travelled in the first user
+        #    message, earned no cache, and was paid for on every request.
+        #    Only the no-tools shield banner is added here.
         local SHIELD_MARKER
         SHIELD_MARKER=$(head -1 "$TECH_CONST" | awk '{print $3}')
         if [ "$BARE_AI_NO_TOOLS" = "false" ]; then
-            combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$TECH_CONST")"
+            # F2: the constitution comes from the system prompt. Nothing is added
+            # here; the role text above is the whole handoff payload for this mode.
+            :
         else
             combined_const="${combined_const}# 🛡️ ${SHIELD_MARKER} THE BARE-AI TECHNICAL DIRECTIVE"$'\n'
             combined_const="${combined_const}***CRITICAL CONTEXT***: Everything above the marker \"🛡️ ${SHIELD_MARKER}\" is your Primary Agent Identity. You are currently operating in pure reasoning and chat mode — system tools and workspace execution are disabled for this session."$'\n\n'
