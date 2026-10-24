@@ -447,3 +447,55 @@ todo validate                              # integrity check (headers + status/f
 - Diary (`~/bare-necessities-workspace/bare-ai-diary/`) = narrative log of what happened + learnings.
 - Todo system = living task state (queued / in-progress / blocked / done).
 - Do not park pending tasks in the diary; record them in the todo system instead.
+
+
+---
+
+## AGENT TASK-BUS UPDATE MANDATE
+(added 2026-10-24 by platform direction)
+
+Every agent that claims or works a task-bus row MUST write its progress to that row DURING the work,
+and MUST update the row before it stops. There are no exceptions and this overrides any preference for
+brevity.
+
+### Required behaviour
+1. ON CLAIM: the row moves to InProgress and records the local job id. The dispatcher does this; do not
+   undo or bypass it.
+2. DURING THE WORK: append timestamped progress notes to the response field - what you are doing, what
+   you have found, what you are waiting on. At minimum once before a long operation and once when the
+   work ends. A row that shows a claim and then nothing tells the fleet nothing.
+3. ON COMPLETION: set status HumanReviewNeeded and write a factual summary naming the files, routes or
+   services you actually touched. Do NOT set Completed yourself - the dispatcher verifies independently
+   and sets the final state.
+4. ON FAILURE OR INTERRUPTION: set Blocked or Retry and fill the retry-reason field. Never leave a row
+   sitting InProgress with no explanation.
+5. NEVER claim work you have not done. An exit code of 0 is NOT evidence that work happened.
+
+### Why this exists
+A gateway ticket was dispatched repeatedly to a worker. Every run returned exit 0, and none of them
+built anything: the required endpoints still returned 404 and no file on the node had changed. The
+acceptance criteria WERE delivered - they appear in the dispatched prompt - so the failure was not
+missing information; it was an executor that did reconnaissance and stopped.
+Separately, a governance ticket was dispatched, returned exit 0 after a very short run, changed
+nothing, and was AUTO-MARKED Completed/Passed because its criterion was exit_zero. A false Passed
+verdict was produced by a job that did no work at all. Both the silence and the false pass are what
+this mandate prevents.
+
+### The criterion trap (read this before authoring a ticket)
+- exit_zero is SELF-FULFILLING: any job that exits 0 grades as Passed, work or no work. Never author
+  exit_zero on a ticket with a real deliverable.
+- If a criterion genuinely cannot be expressed as file_exists, file_md5, file_sha256, http_200,
+  http_status or git_ls_remote, say so in the ticket and require a NAMED verifier. Do not let a guard
+  auto-pass it.
+- Criterion directives are SEMICOLON separated, and paths must be absolute (a tilde is rejected).
+- A Passed verdict is still a claim: read the artefact before believing it.
+
+### Worked example (copy this shape)
+  [timestamp] claimed; job <job-uuid>; starting with the router file
+  [timestamp] progress: added the routes, service restarted, checking the health endpoint
+  [timestamp] done: health 200, unauthenticated rows 401; changed the router and app entrypoint;
+              status -> HumanReviewNeeded for dispatcher verification
+
+### Scope note
+This mandate lives in the delivered technical constitution so that every node, including those built
+after the change, receives it on install/update.

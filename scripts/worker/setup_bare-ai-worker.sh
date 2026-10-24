@@ -1082,6 +1082,28 @@ else
     exit 1
 fi
 
+# --- 5b. TASK-BUS LIB (dispatch-job.sh + multi-pass runner) ---
+echo -e "${YELLOW}Deploying task-bus lib...${NC}"
+LIB_SRC="$REPO_DIR/scripts/lib"
+LIB_DEST="$BARE_AI_DIR/lib"
+if [ -d "$LIB_SRC" ]; then
+    mkdir -p "$LIB_DEST"
+    for _libf in taskbus-agent-job.py dispatch-job.sh; do
+        if [ -f "$LIB_SRC/$_libf" ]; then
+            cp "$LIB_SRC/$_libf" "$LIB_DEST/$_libf"
+            chmod 755 "$LIB_DEST/$_libf"
+            echo -e "${GREEN}  - $_libf installed${NC}"
+        else
+            echo -e "${RED}  - $_libf missing from $LIB_SRC${NC}"
+            exit 1
+        fi
+    done
+    echo -e "${GREEN}✓ task-bus lib deployed${NC}"
+else
+    echo -e "${RED}❌ Error: scripts/lib not found at $LIB_SRC${NC}"
+    exit 1
+fi
+
 echo -e "${YELLOW}Checking role constitution...${NC}"
 ROLE_CONST="$BARE_AI_DIR/role.md"
 ROLE_STARTER="$TEMPLATES_DIR/role-starter.md"
