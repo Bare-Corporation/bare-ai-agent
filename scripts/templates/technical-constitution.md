@@ -499,3 +499,58 @@ this mandate prevents.
 ### Scope note
 This mandate lives in the delivered technical constitution so that every node, including those built
 after the change, receives it on install/update.
+
+---
+
+# CONVEYOR BELT PIPELINE
+(added 2026-10-24 by platform direction)
+
+The Conveyor Belt is the fleet's zero-trust Agent CI/CD pipeline. It is the only trusted path from a commit
+to a running service or to a release artefact. The trust does not come from the agent meaning well; it comes
+from the two properties the belt has and a hand-typed shell command does not:
+
+- the run is DECLARED before it starts, and
+- the run is RECORDED after it finishes.
+
+## RULES — NO BYPASS
+1. **Builds and deploys go through the pipeline.** Anything that produces a release artefact (image,
+   package, bundle, binary) or changes what is running on a host (deploy, rollout, service restart into a
+   new build, schema migration) is a Conveyor Belt job. Do not run `docker build`, `docker compose up`,
+   `rsync`/`scp` releases, `git pull && systemctl restart`, or a bespoke `deploy.sh` chain by hand to get
+   a change live.
+2. **Local verification is not a deploy.** Compiling, linting and running the test suite in your own
+   checkout to check your work is normal and expected. The line is the artefact and the running service:
+   the moment an output has to leave your scratch tree and become something others run, the belt carries it.
+3. **The pipeline is declarative.** What runs is written down in the pipeline definition before it runs —
+   the steps, their order, the environment, the gates and the target. That definition is the single source
+   of truth. A step that matters belongs in the declaration, not in a shell loop you typed this session: a
+   build that exists only in your terminal history is not a build.
+4. **The pipeline records its own ledger.** Every run appends a record naming the request, the commit it
+   built, the steps that ran, what each returned, and who asked for it. The ledger — not your narrative and
+   not an exit code of 0 — is the evidence that a build or deploy happened. When you report a deploy, cite
+   the ledger entry.
+5. **An agent MUST NOT bypass the pipeline.** Bypassing includes, but is not limited to:
+   - running the build or the deploy by hand "just this once" while the belt is available;
+   - reusing a stale artefact and describing it as a fresh build;
+   - pushing an image, copying binaries or restarting a service out of band;
+   - weakening, skipping, commenting out or force-passing a gate (lint, test, secret scan, review);
+   - editing, truncating or fabricating ledger entries, or reporting a run that never happened.
+6. **A broken belt is a finding, not an invitation.** If the pipeline is missing, blocked or failing on
+   this node, record that plainly in the task row and stop. Do not construct a private side-channel
+   deploy to get round it: an undeclared, unrecorded deploy path is precisely what zero-trust exists to
+   prevent.
+
+## Extending the belt, not routing around it
+If the pipeline does not yet cover what you need, extend the declaration and let it execute. If a step
+genuinely cannot be expressed in the pipeline, say so explicitly in the task row, give the reason, and get
+human authorisation before doing it by hand. "The pipeline could not do it" is an acceptable answer only
+when you have written down that you checked.
+
+## Ledger vs. claim
+The ledger is the record of what the pipeline actually executed; it is not a place to demonstrate intent.
+A missing or empty entry means nothing ran, whatever a summary says. Where the ledger and an agent's report
+disagree, the ledger wins.
+
+## Scope note
+This section lives in the delivered technical constitution so that every node — including nodes built after
+the change, and nodes re-provisioned later — receives it on install/update.
