@@ -10,6 +10,13 @@
 
 set -u
 
+# [GITLEAKS-PATH-20261026] Non-interactive shells (the M2M task-bus runner, cron, and an
+# agent's tool shell) never source ~/.bashrc, so ~/.local/bin is missing from PATH and the
+# check below rejects a scanner that is actually installed. Prepend the user bin dir so this
+# hook behaves the same however git was invoked. Do not remove: see task-bus row 265.
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+
 # --- agent-file guard -------------------------------------------------------
 if ! git diff --cached --quiet -- role.md; then
   if [ -s role.md ]; then
