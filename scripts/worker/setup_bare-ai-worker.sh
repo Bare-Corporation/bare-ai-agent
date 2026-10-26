@@ -1107,22 +1107,39 @@ fi
 echo -e "${YELLOW}Checking role constitution...${NC}"
 ROLE_CONST="$BARE_AI_DIR/role.md"
 ROLE_STARTER="$TEMPLATES_DIR/role-starter.md"
+BARE_ENV_FILE="$BARE_AI_DIR/bare-environment.md"
 
-if [ ! -f "$ROLE_CONST" ]; then
-    if [ -f "$ROLE_STARTER" ]; then
-        cp "$ROLE_STARTER" "$ROLE_CONST"
-        echo -e "${GREEN}✓ Starter role constitution created at ~/.bare-ai/role.md${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Role starter template not found — creating blank role.md${NC}"
-        echo "# BARE-AI ROLE CONSTITUTION
-# Edit this file to define this agent's role and personality." > "$ROLE_CONST"
-    fi
-else
+# [ROLESTUB-GHOST-TEMPLATE-20261026] role.md is OPTIONAL, not mandatory.
+# A node that has migrated its role into bare-environment.md deliberately has no
+# role.md: every read of it is guarded by [ -f ], so its absence is by design.
+# The starter copy must therefore run ONLY on a genuinely new node. On a migrated
+# node it would silently replace a real identity with the stock template, and the
+# agent would boot on a placeholder while the operator believed the real
+# constitution was in force. An existing role.md is never read, never overwritten
+# and never deleted here.
+if [ -f "$ROLE_CONST" ]; then
     echo -e "${GREEN}✓ Role constitution already exists — not overwritten${NC}"
+elif [ -f "$BARE_ENV_FILE" ]; then
+    echo -e "${GREEN}role.md fallback SKIPPED: bare-environment.md present ($BARE_ENV_FILE)${NC}"
+elif [ -f "$ROLE_STARTER" ]; then
+    cp "$ROLE_STARTER" "$ROLE_CONST"
+    echo -e "${GREEN}role.md starter created: no bare-environment.md and no role.md${NC}"
+else
+    echo -e "${YELLOW}⚠️  Role starter template not found — creating blank role.md${NC}"
+    echo "# BARE-AI ROLE CONSTITUTION
+# Edit this file to define this agent's role and personality." > "$ROLE_CONST"
+    echo -e "${GREEN}role.md starter created (blank): no bare-environment.md and no role.md${NC}"
 fi
 
-ln -sf "$ROLE_CONST" "$REPO_DIR/role.md"
-echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
+# The visible link lets a human find the role from the repo directory. On a
+# migrated node there is no role.md to point at, and a dangling link would
+# re-create the ghost: skip it rather than publish a path that resolves to nothing.
+if [ -f "$ROLE_CONST" ]; then
+    ln -sf "$ROLE_CONST" "$REPO_DIR/role.md"
+    echo -e "${GREEN}✓ Created visible role.md link in agent directory${NC}"
+else
+    echo -e "${GREEN}role.md link SKIPPED: no role.md at $ROLE_CONST${NC}"
+fi
 
 #####################################################
 #####################################################
