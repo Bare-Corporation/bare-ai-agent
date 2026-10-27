@@ -1154,7 +1154,9 @@ This directory stores the persistent configuration and memory for the BARE-AI ag
 
 ## Directory Structure
 - **technical-constitution.md** — Core Linux tool rules (read-only, managed by bare-ai-agent)
-- **role.md** — Agent personality and mission (edit freely, never overwritten)
+- **role.md** — Agent role (OPTIONAL since 2026-10-25; edit freely, never overwritten)
+- **bare-archetype.md** — Public archetype: this machine's purpose, safe to publish
+- **bare-environment.md** — PRIVATE node environment: address, paths, credentials. Never publish.
 - **diary/** — Daily activity logs
 - **logs/** — JSON telemetry per command execution
 - **bin/** — Local binaries and symlinks
@@ -1175,8 +1177,12 @@ written, and you never need to run 'git stash' manually.
   context (BARE_AI.md), rebuilt fresh every time you run 'bare'.
 
 ## Customising Your Agent
-Edit ~/.bare-ai/role.md to define this agent's personality, mission, and domain rules.
-The technical-constitution.md is managed by the repo — do not edit it directly.
+The launcher loads an identity chain, in this order, and every file is optional:
+  1. ~/.bare-ai/role.md             - the agent's role and domain rules
+  2. ~/.bare-ai/bare-archetype.md   - the public archetype (what this machine is for)
+  3. ~/.bare-ai/bare-environment.md - the PRIVATE node environment (where it runs)
+Run bare-env to edit the environment file, or bare-constitution to read the
+technical constitution, which is managed by the repo - do not edit it directly.
 README_EOF
 echo -e "${GREEN}✓ README written${NC}"
 
@@ -1237,6 +1243,14 @@ bare() {
     local TODAY=$(date +%Y-%m-%d)
     local TECH_CONST="$HOME/.bare-ai/technical-constitution.md"
     local ROLE_CONST="$HOME/.bare-ai/role.md"
+    # [IDENTITY-CHAIN-20261027] The launcher loads THREE identity files, in this
+    # order: role.md (OPTIONAL - its absence is legitimate since the 2026-10-25
+    # retirement), then the public archetype, then the private environment.
+    # Before this change only role.md was read, so on a migrated node the agent
+    # ran on the technical constitution alone and the environment file was never
+    # seen by ANY node through the launcher.
+    local ARCHETYPE_CONST="$HOME/.bare-ai/bare-archetype.md"
+    local ENVIRONMENT_CONST="$HOME/.bare-ai/bare-environment.md"
     local DIARY="$HOME/bare-necessities-workspace/bare-ai-diary/$TODAY.md"
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
@@ -1298,8 +1312,8 @@ bare() {
         echo -e "\033[0;31mRe-run setup_bare-ai-worker.sh to restore it.\033[0m"
         return 1
     fi
-    if [ ! -f "$ROLE_CONST" ]; then
-        echo -e "\033[1;33mWarning: No role constitution at $ROLE_CONST — running with technical only.\033[0m"
+    if [ ! -f "$ROLE_CONST" ] && [ ! -f "$ARCHETYPE_CONST" ] && [ ! -f "$ENVIRONMENT_CONST" ]; then
+        echo -e "\033[1;33mWarning: no identity file found (role.md, bare-archetype.md, bare-environment.md) — running with technical only.\033[0m"
     fi
 
     export VAULT_SECRET_PATH="secret/data/${MODEL}/config"
@@ -1318,7 +1332,14 @@ bare() {
     # ----------------------------------------
 
     export BARE_AI_CONSTITUTION="$TECH_CONST"
-    export BARE_AI_ROLE_CONSTITUTION="$ROLE_CONST"
+    # [IDENTITY-CHAIN-20261027] There are three identity files now, so this
+    # variable can no longer name just role.md. Point it at the first one that
+    # exists; it is retained for compatibility with anything that reads it.
+    export BARE_AI_ROLE_CONSTITUTION=""
+    local _idc
+    for _idc in "$ROLE_CONST" "$ARCHETYPE_CONST" "$ENVIRONMENT_CONST"; do
+        if [ -f "$_idc" ]; then BARE_AI_ROLE_CONSTITUTION="$_idc"; break; fi
+    done
     export BARE_AI_DIARY="$DIARY"
 
     if [ "$ENGINE_TYPE" = "sovereign" ]; then
@@ -1334,11 +1355,26 @@ bare() {
         # risks blocking 'git pull' / 'bare-update'.
         local combined_const=""
 
-        # 1. Role Constitution FIRST — must appear above the shield marker
-        # in technical-constitution.md, per the directive's instructions.
-        if [ -f "$ROLE_CONST" ]; then
-            combined_const="${combined_const}$(sed "s|{{DATE}}|$TODAY|g" "$ROLE_CONST")"$'\n\n'
-        fi
+        # 1. Identity chain FIRST — it must appear above the shield marker in
+        # technical-constitution.md, per the directive's instructions.
+        # [IDENTITY-CHAIN-20261027] Three files, in order, every one OPTIONAL:
+        #   role.md             - the agent's role (absent on a migrated node)
+        #   bare-archetype.md   - the public archetype
+        #   bare-environment.md - the private node environment
+        # Each is read with the read-builtin so its contents never enter argv:
+        # a large role once blew the kernel's per-argument exec limit (E2BIG).
+        # The {{DATE}} substitution applies to role.md only; the archetype and
+        # the environment are inserted byte-exact.
+        local _ident_file="" _ident_text=""
+        for _ident_file in "$ROLE_CONST" "$ARCHETYPE_CONST" "$ENVIRONMENT_CONST"; do
+            [ -f "$_ident_file" ] || continue
+            _ident_text=""
+            IFS= read -r -d '' _ident_text < "$_ident_file" || true
+            if [ "$_ident_file" = "$ROLE_CONST" ]; then
+                _ident_text="${_ident_text//"{{DATE}}"/$TODAY}"
+            fi
+            combined_const="${combined_const}${_ident_text}"$'\n\n'
+        done
 
 
         # 3. Technical constitution: its TEXT reaches the model as the SYSTEM
@@ -1468,7 +1504,12 @@ bare-work() {
     BARE_CLONE_DIR="$HOME/bare-ai-cli-work" bare "$@"
 }
 
-alias bare-role='${EDITOR:-nano} '"$HOME"'/.bare-ai/role.md'
+# [IDENTITY-CHAIN-20261027] The old role alias opened ~/.bare-ai/role.md,
+# which is now OPTIONAL and may not exist. Because nano with a missing path
+# CREATES the file, that alias was a way to resurrect a role.md stub by accident.
+# bare-env opens the file that always exists and that the launcher now always reads.
+alias bare-env='${EDITOR:-nano} '"$HOME"'/.bare-ai/bare-environment.md'
+
 alias bare-constitution='cat '"$HOME"'/.bare-ai/technical-constitution.md'
 alias bare-uninstall=''"$HOME"'/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
 alias bare-update='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
@@ -1480,6 +1521,25 @@ if [ "$BARE_BASHRC_BLOCK_FOUND" = true ]; then
     echo -e "${GREEN}OK: bare() launcher refreshed in $BASHRC_FILE${NC}"
 else
     echo -e "${GREEN}OK: bare() launcher installed in $BASHRC_FILE${NC}"
+fi
+
+# [IDENTITY-CHAIN-20261027] A second bare() definition silently wins, because bash
+# uses the LAST definition it reads. A node was found with two definitions, so the
+# launcher actually in force was not the one this installer had written. This
+# installer only owns the delimited block, so a stray definition OUTSIDE that block
+# is reported here, never deleted - rewriting a user's file beyond the managed
+# region is not this script's business.
+BARE_DEF_COUNT=$(grep -c '^[[:space:]]*bare()' "$BASHRC_FILE" 2>/dev/null || true)
+case "$BARE_DEF_COUNT" in
+    ''|*[!0-9]*) BARE_DEF_COUNT=0 ;;
+esac
+if [ "$BARE_DEF_COUNT" -gt 1 ]; then
+    echo -e "${RED}WARNING: $BASHRC_FILE defines bare() $BARE_DEF_COUNT times - the LAST one wins.${NC}"
+    echo -e "${YELLOW}         Definition lines: $(grep -n '^[[:space:]]*bare()' "$BASHRC_FILE" | cut -d: -f1 | tr '\n' ' ')${NC}"
+    echo -e "${YELLOW}         Only the region between the BARE-AI-AGENT markers is managed here.${NC}"
+    echo -e "${YELLOW}         Back the file up, then remove the stray definition(s) by hand.${NC}"
+else
+    echo -e "${GREEN}OK: exactly one bare() definition in $BASHRC_FILE${NC}"
 fi
 
 #####################################################
@@ -1539,7 +1599,7 @@ echo -e "0. Run: ${NC}nano ~/.bare-ai/config/vault.env${NC}\n"
 fi
 
 echo -e "1. ${YELLOW}Reload:${NC}        source ~/.bashrc (<< req - reloads your systems ~/.bashrc with modifications.)"
-echo -e "2. ${YELLOW}Edit role:${NC}     bare-role  (<< opt - customise your agent personality.)"
+echo -e "2. ${YELLOW}Edit identity:${NC} bare-env  (<< opt - node environment; role.md remains optional.)"
 echo -e "3. ${YELLOW}Run agent:${NC}     bare (<< required.)"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "4. ${GREEN}Update:${NC}        bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"

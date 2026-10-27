@@ -28,12 +28,19 @@ The architecture separates three concerns:
 
 ### Workers
 
-Workers operate under two constitutions:
+Workers load an **identity chain** beneath the constitution. Every file is optional:
 
 - **Technical Constitution** (`~/.bare-ai/technical-constitution.md`) — read-only;
-  defines tool-use boundaries, resource limits, and operational style.
-- **Functional Constitution** (`~/.bare-ai/role.md`) — user-defined; defines the
-  agent persona and functional scope.
+  defines tool-use boundaries, resource limits, and operational style. Managed by the repo.
+- **Role** (`~/.bare-ai/role.md`) — the agent's role and domain rules. Optional since the
+  2026-10-25 retirement: a migrated node may not have one.
+- **Public archetype** (`~/.bare-ai/bare-archetype.md`) — what this machine is for.
+  Safe to publish.
+- **Private environment** (`~/.bare-ai/bare-environment.md`) — where it runs: address,
+  paths, credentials. Never published, never committed.
+
+The launcher reads role, then archetype, then environment, and only warns when none of
+the three exists.
 
 ### Secrets (OpenBao)
 
@@ -272,8 +279,8 @@ bare-uninstall
 # Launch with a specific model (bypass the switchboard)
 bare <LLMName>
 
-# Set the agent role (persona + functional scope)
-bare-role
+# Edit this node's private environment (role.md remains optional)
+bare-env
 
 # Update without overwriting Vault secrets (Pro deployments)
 bare-update-pro
