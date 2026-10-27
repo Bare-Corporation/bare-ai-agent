@@ -170,7 +170,8 @@ MAX_PASSES = int(os.environ.get("TASKBUS_MAX_PASSES", "3"))
 # ---- criterion execution -------------------------------------------------
 # The POLLER parses success_criterion (single source of truth for the grammar) and ships the
 # parsed checks here as JSON. This runner only EXECUTES them, so the grammar can never diverge.
-# Kinds: http_status[url,code] | file_exists[path] | file_md5[path,hex] | file_sha256[path,hex]
+# Kinds: http_status[url,code] | file_exists[path] | file_md5[path,hex] |
+#        file_sha256[path,hex] | file_excludes[path,literal-text]
 #        git_ls_remote[...] -> not executable here; reported as deferred (the poller re-checks).
 def _run_check(kind, args):
     import hashlib, urllib.request, urllib.error
@@ -197,6 +198,16 @@ def _run_check(kind, args):
                     h.update(chunk)
             got = h.hexdigest()
             return (got == want), "%s %s=%s (want %s)" % (p, kind, got[:12], want[:12])
+        if kind == "file_excludes":
+            # NEGATIVE assertion: PASS only if the file exists and the literal text is ABSENT.
+            # Missing file is a FAIL - absence cannot be verified in a file that does not exist.
+            p, lit = args[0], str(args[1])
+            if not os.path.exists(p):
+                return False, "%s MISSING - cannot verify absence in a file that is not there" % p
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                body = fh.read()
+            found = lit in body
+            return (not found), "%s %s %r" % (p, "CONTAINS" if found else "excludes", lit)
         if kind == "git_ls_remote":
             return None, "git_ls_remote deferred to the poller"
         return None, "unknown check kind %r deferred" % kind

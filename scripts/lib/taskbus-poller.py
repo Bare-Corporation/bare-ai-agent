@@ -855,6 +855,23 @@ def parse_check(spec):
             return None, problem
         return ("file_exists", (rest,)), None
 
+    if kind == "file_excludes":
+        # NEGATIVE assertion (ticket 246): pass only when the file exists AND the literal text is
+        # ABSENT. Added because exit_zero and file_exists both certified work that had not happened;
+        # a refactor is only done when the thing being removed is actually gone.
+        if "=" not in rest:
+            return None, "file_excludes needs PATH=TEXT"
+        path, lit = rest.rsplit("=", 1)
+        path, lit = path.strip(), lit.strip()
+        if not path:
+            return None, "file_excludes needs a path"
+        if not lit:
+            return None, "file_excludes needs a non-empty TEXT to look for"
+        problem = _path_problem("file_excludes", path)
+        if problem:
+            return None, problem
+        return ("file_excludes", (path, lit)), None
+
     if kind in ("file_md5", "file_sha256"):
         if "=" not in rest:
             return None, "%s needs PATH=HASH" % kind
