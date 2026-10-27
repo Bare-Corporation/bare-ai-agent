@@ -1,0 +1,17 @@
+[Unit]
+Description=Bare-AI Taskbus Poller (rep-filtered)
+Documentation=file:///home/bare-ai/bare-ai-agent/scripts/worker/start-taskbus-poller.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/bare-ai/bare-ai-agent/scripts/worker/start-taskbus-poller.sh --live --interval 300
+Restart=on-failure
+RestartSec=30
+# The launcher owns the filter and fails closed. No POLLER_* Environment= lines belong here: a unit
+# that sets them itself reintroduces exactly the ad-hoc path this replaced.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

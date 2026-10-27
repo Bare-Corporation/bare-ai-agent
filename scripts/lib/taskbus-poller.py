@@ -53,7 +53,11 @@ TABLE = 215
 # Own identity, overridable per node (2026-10-26). A leaf poller must know WHICH host
 # it is, or it treats itself as remote, attempts an ssh it cannot make, and stamps
 # verified_by with another machine's name. Default preserves the original value.
-ME = os.environ.get("POLLER_SELF_NODE", "").strip() or "bare-ai-brain@100.64.0.4"
+# IDENTITY IS NOT OPTIONAL (ticket 275). This used to fall back to a hardcoded
+# "bare-ai-brain@100.64.0.4", so a node started without POLLER_SELF_NODE attested its
+# verdicts as if THIS node had graded them. Refuse to run instead: a poller that cannot
+# name itself must not grade anything.
+ME = os.environ.get("POLLER_SELF_NODE", "").strip()
 
 # ------------------------------------------------- CROSS-MACHINE DISPATCH (.4 is the brain)
 # Liege design 2026-09-13: .4 READS the table and DISPATCHES; it does not do the work itself.
@@ -313,6 +317,14 @@ def log(msg, level="INFO"):
 
 
 # ------------------------------------------------------------------ table access
+
+def require_identity():
+    """Fail closed when the launcher did not tell us who we are (ticket 275)."""
+    if not ME:
+        raise SystemExit("FATAL: POLLER_SELF_NODE is unset. Start the poller with "
+                         "scripts/worker/start-taskbus-poller.sh - an unnamed poller "
+                         "must not grade or dispatch anything.")
+
 
 def load_agent_context():
     """Read the agent context files and return (ok, one_line_summary).
