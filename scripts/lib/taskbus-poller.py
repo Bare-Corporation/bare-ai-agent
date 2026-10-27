@@ -57,7 +57,7 @@ ME = os.environ.get("POLLER_SELF_NODE", "").strip() or "bare-ai-brain@100.64.0.4
 
 # ------------------------------------------------- CROSS-MACHINE DISPATCH (.4 is the brain)
 # Liege design 2026-09-13: .4 READS the table and DISPATCHES; it does not do the work itself.
-# assigned_to_machine names the TARGET, not the consumer. So .4 claims rows for any machine
+# the legacy machine field names the TARGET, not the consumer. So .4 claims rows for any machine
 # it can reach and sends the job over SSH, then polls that machine's job state next cycle.
 SSH_USER = "bare-ai"
 REMOTE_JOBS = "/home/bare-ai/.bare-ai/jobs"
@@ -618,24 +618,17 @@ def remote_pid_alive(node, pid):
     return out.strip() == "yes"
 
 
-def node_for(row):
-    """The node a row should run on, or None if .4 cannot dispatch to that machine."""
-    m = row.get("assigned_to_machine")
-    m = m.get("value") if isinstance(m, dict) else m
-    return DISPATCHABLE.get(m)
-
-
 # ---------------------------------------------------------------------------
 # PER-MACHINE OWNERSHIP FILTER (v2.1, 2026-10-25)
 #
 # Table 215 now carries stakeholder_representatives_master -> table 43 (field 6378).
-# That array is the AUTHORITY for which machine owns a row. assigned_to_machine
+# That array is the AUTHORITY for which machine owns a row. the legacy machine field
 # (5525) is legacy and is being retired.
 #
 # Modes (POLLER_FILTER_MODE):
 #   rep    : 6378 only. A row with no representative is UNOWNED and is not claimed by
 #            anyone. This is the target end-state.
-#   legacy : assigned_to_machine only. Pre-migration behaviour.
+#   legacy : the legacy machine field only. Pre-migration behaviour.
 #   dual   : 6378 first; fall back to 5525 ONLY when 6378 is empty, and LOG a warning
 #            every time the fallback is used, so the cutover is observable rather than
 #            silent. DEFAULT, because no machine is registered in 43 yet - turning on
@@ -682,7 +675,7 @@ def rep_ids(row):
     return out
 
 
-def resolve_target(row, rep_index, mode, self_rep, legacy_node):
+def resolve_target(row, rep_index, mode, self_rep):
     """PURE decision: which node should run this row, and why.
 
     Returns (node, path, detail). node None means "do not claim".
@@ -691,19 +684,20 @@ def resolve_target(row, rep_index, mode, self_rep, legacy_node):
     reps = rep_ids(row)
     if self_rep is not None and reps and self_rep not in reps:
         return None, "not-mine", "6378=%s excludes self_rep=%s" % (reps, self_rep)
-    if mode in ("rep", "dual") and reps:
+    if reps:
         mapped = [rep_index[r] for r in reps if r in rep_index]
         if mapped:
             return mapped[0], "rep", "6378=%s -> %s" % (reps, mapped[0])
         # An owner IS declared but cannot be resolved to a node. NEVER fall back to the
-        # legacy field here: dispatching to whatever assigned_to_machine happens to say is
+        # legacy field here: dispatching to whatever the legacy machine field happens to say is
         # precisely how a row gets executed by the wrong machine. Fail closed, log, move on.
         return None, "rep-unmapped", "6378=%s not resolvable to a node" % (reps,)
-    if mode in ("legacy", "dual"):
-        if legacy_node:
-            return legacy_node, "legacy", "assigned_to_machine (no 6378 mapping)"
-        if not reps:
-            return None, "unowned", "no 6378 and no dispatchable assigned_to_machine"
+    # ROUTING IS REP-ONLY. There is no machine-name fallback: a row with no resolvable
+    # representative is UNOWNED and is skipped, whatever POLLER_FILTER_MODE says. The legacy
+    # mode name is still accepted so an un-updated node does not crash, but it cannot change
+    # the decision below.
+    if not reps:
+        return None, "unowned", "no 6378 representative on the row (routing is rep-only)"
     return None, "not-mine" if reps else "unowned", "6378=%s mode=%s" % (reps, mode)
 
 
@@ -1241,7 +1235,7 @@ def completion_guard(row, node=None, exit_code=None):
         return False, ["success_criterion is empty - cannot meet an unstated "
                        "criterion"], []
 
-    verdict, evidence, reasons = verify_row(node or node_for(row), row, exit_code)
+    verdict, evidence, reasons = verify_row(node, row, exit_code)
     if verdict == "passed":
         return True, [], (evidence + crit_notes)
     return False, (reasons + crit_notes), evidence
@@ -1611,7 +1605,7 @@ class Poller:
                 continue
             rid = row["id"]
             uu = job_uuid_of(row)
-            target = node_for(row)
+            target = self.node_for_row(row)[0]
             if target and not is_local_node(target):
                 # Cancelled wins on a REMOTE machine too. But only act when the node is
                 # REACHABLE and the job is definitively still running - killing blind is
@@ -1756,12 +1750,12 @@ class Poller:
             if ONLY_ROWS and rid not in ONLY_ROWS:
                 continue
             uu = job_uuid_of(row)
-            target = node_for(row)
+            target = self.node_for_row(row)[0]
             if not target:
                 log("row %s is InProgress but its machine is not dispatchable by .4 - "
                     "cannot reconcile" % rid, "WARN")
                 self.record("reconcile-no-target", rid,
-                            "assigned_to=%s" % str(fval(row, "assigned_to_machine")))
+                            "6378=%s" % rep_ids(row))
                 continue
 
             # ---- UNREACHABLE SAFEGUARD (liege 2026-09-13, explicitly requested) -------
@@ -1835,7 +1829,7 @@ class Poller:
         mode = os.environ.get("POLLER_FILTER_MODE", "").strip().lower() or "dual"
         self_rep = os.environ.get("POLLER_SELF_REP", "").strip()
         self_rep = int(self_rep) if self_rep.isdigit() else None
-        return resolve_target(row, idx, mode, self_rep, node_for(row))
+        return resolve_target(row, idx, mode, self_rep)
 
     def rep_index(self):
         """rep row id -> node ip, from table 43, cached for 10 minutes."""
@@ -1879,16 +1873,13 @@ class Poller:
             rid = row["id"]
             if ONLY_ROWS and rid not in ONLY_ROWS:
                 continue
-            # CROSS-MACHINE: assigned_to_machine is the TARGET, not the consumer. .4
+            # CROSS-MACHINE: the legacy machine field is the TARGET, not the consumer. .4
             # dispatches to any node it can reach. A machine .4 cannot reach (e.g. the
             # ingress node, which .4 has no key for) is skipped, not claimed-then-failed.
             target_node, path_used, why = self.node_for_row(row)
             if not target_node:
                 self.record("target-not-dispatchable", rid, why)
                 continue
-            if path_used == "legacy":
-                log("row %s: claimed via LEGACY assigned_to_machine (%s) - no 6378 mapping yet"
-                    % (rid, why), "WARN")
 
             # ---- SCHEDULING GATE (start_task_at + peak/off-peak), deterministic
             vok, vkind, vdetail = self.schedule_verdict(row)
