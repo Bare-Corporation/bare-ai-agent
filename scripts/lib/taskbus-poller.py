@@ -7,12 +7,18 @@ DESIGN INVARIANTS (from the scope, non-negotiable):
   * DRY-RUN IS THE DEFAULT. Starting work requires --live.
   * Reconciliation runs BEFORE intake, so a wedged task never blocks its dependants.
   * Cancelled is terminal and always wins, at every stage.
-  * Completed is FAIL-CLOSED, and is decided by DISPATCHER-SIDE INDEPENDENT
-    VERIFICATION (Option C). The dispatcher evaluates a machine-readable
-    success_criterion on the target node; only if every check passes does it write
-    verification_result=Passed and verified_by=<dispatcher>. An executor never
-    self-reports success. A criterion that cannot be machine-checked goes to
-    HumanReviewNeeded for a manual override (Option B), which is then honoured.
+  * GATEWAY-ONLY (ticket 332). Every row read and every row write goes through
+    /v1/taskbus/*. There is no direct table-215 PATCH/POST on the claim or complete
+    path, and the gateway owns status, attempts_taken, the lease and the claim nonce.
+  * Completed is DISPATCHER-ONLY and is NEVER written by this poller, on any path.
+    An executor's terminal state is HumanReviewNeeded. Independent verification, when
+    it passes, is recorded as EVIDENCE for the dispatcher - it is not a terminal
+    state, because a job that exits 0 has proved nothing on its own.
+  * exit_zero is BANNED as the success_criterion of any row that names a deliverable:
+    it is self-fulfilling, and a poller that accepts it certifies work that may not
+    have happened. See exit_zero_ban_verdict().
+  * The kill switch is checked BEFORE EVERY claim attempt, not once per cycle.
+  * A lapsed lease is never reclaimed to append a closing note (no late close).
   * The poller holds NO in-memory truth across cycles. The table is the truth.
   * Every row is read IN FULL before it is acted on.
 
@@ -436,6 +442,237 @@ def poller_baserow_jwt(base):
 
 
 
+# =====================================================================
+# TASK-BUS GATEWAY CLIENT  (ticket 311 slices 1-3B, carried in by 332)
+#
+# Contract verified against the gateway's own source (2026-10-29):
+#   POST  /v1/taskbus/rows/{id}/claim
+#         -> {nonce, status, attempts_taken, claimed_at, lease_expires_at, machine}
+#         The gateway ITSELF writes status=InProgress, attempts_taken+1,
+#         start_task_at, claimed_by_machine, claim_nonce_hash and lease_expires_at.
+#         The client must not send those fields.
+#   PATCH /v1/taskbus/rows/{id}   (header X-Claim-Nonce)
+#         Executor-writable: machines_response, re_opened_or_retry_reason,
+#         corresponding_machine_task_id, status (InProgress | HumanReviewNeeded |
+#         Blocked), human_notes.
+#         Completed and New are REFUSED to executors (403); attempts_taken,
+#         verification_result and verified_by are dropped.
+#   GET   /v1/taskbus/rows?status=&page=&page_size=
+#         -> {results, total|count, has_next}
+#
+# The agent API key is read from Vault at the moment of use. It is never logged,
+# never written to disk and never placed in argv.
+# =====================================================================
+
+# The Vault mount holding agent keys is "bare-taskbus", NOT "taskbus". The older
+# mount still resolves but its copy of the key is revoked, so a poller pointed at it
+# looks configured while every gateway call returns 401.
+#
+# Both the key path and the gateway base are PER-NODE environment configuration. They
+# are deliberately not defaulted here: the node identity and the fleet's internal
+# addressing belong in the host's unit file, not in a public repository. Fail closed
+# and say what is missing rather than guessing an endpoint.
+AGENT_KEY_SECRET_PATH = os.environ.get("AGENT_KEY_SECRET_PATH", "").strip()
+GATEWAY_BASE = os.environ.get("TASKBUS_GATEWAY_BASE", "").rstrip("/")
+GATEWAY_UA = "bare-ai-taskbus-poller/332-gateway-only"
+
+# Fields the dispatcher owns. The gateway drops them silently (400 if they are the
+# only fields sent), so the client strips them locally: a write that looks accepted
+# while changing nothing is worse than a refused one.
+GATEWAY_FORBIDDEN_FIELDS = (
+    "attempts_taken", "claim_nonce_hash", "lease_expires_at",
+    "claimed_by_machine", "start_task_at", "verification_result", "verified_by",
+)
+
+# Statuses an executor may ask the gateway to set. Completed is deliberately absent.
+GATEWAY_WRITABLE_STATUSES = ("InProgress", "HumanReviewNeeded", "Blocked")
+
+
+class GatewayError(RuntimeError):
+    """Gateway unreachable or refused the call. Never carries the key."""
+
+
+class AgentKeyError(RuntimeError):
+    """This node's agent key could not be sourced. Fail closed."""
+
+
+_AGENT_KEY_CACHE = {"key": None, "key_id": None}
+
+
+def agent_api_key(force=False):
+    """Return this node's agent API key from Vault. FAILS CLOSED.
+
+    No fallback to a file, an env var or a shared token: a failed lookup means the
+    credential is untrusted, not optional.
+    """
+    if _AGENT_KEY_CACHE["key"] and not force:
+        return _AGENT_KEY_CACHE["key"]
+    path = AGENT_KEY_SECRET_PATH
+    if not path:
+        raise AgentKeyError("AGENT_KEY_SECRET_PATH is not set. It is per-node "
+                            "configuration (the host unit supplies it); there is no "
+                            "built-in default because the path contains the node id.")
+    try:
+        env = _vault_exports()
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        addr = env["VAULT_ADDR"].rstrip("/")
+        body = json.dumps({"role_id": env["VAULT_ROLE_ID"],
+                           "secret_id": env["VAULT_SECRET_ID"]}).encode()
+        req = urllib.request.Request(addr + "/v1/auth/approle/login", data=body)
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+            vt = json.loads(resp.read())["auth"]["client_token"]
+        req = urllib.request.Request(addr + "/v1/" + AGENT_KEY_SECRET_PATH)
+        req.add_header("X-Vault-Token", vt)
+        with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+            data = json.loads(resp.read())["data"]["data"]
+        key = (data.get("api_key") or "").strip()
+        if not key:
+            raise AgentKeyError("api_key field is empty at " + AGENT_KEY_SECRET_PATH)
+        _AGENT_KEY_CACHE["key"] = key
+        _AGENT_KEY_CACHE["key_id"] = data.get("key_id")
+        return key
+    except AgentKeyError:
+        raise
+    except Exception as exc:
+        raise AgentKeyError("cannot source agent key from " + AGENT_KEY_SECRET_PATH
+                            + ": " + type(exc).__name__ + ": " + str(exc)[:120])
+
+
+def agent_key_status():
+    """(ok, detail) for status logging. Never returns or logs the key itself."""
+    try:
+        key = agent_api_key(force=True)
+        return True, ("loaded from %s | key_id=%s | length=%d"
+                      % (AGENT_KEY_SECRET_PATH, _AGENT_KEY_CACHE.get("key_id"), len(key)))
+    except AgentKeyError as exc:
+        return False, str(exc)
+
+
+def _gw_request(path, method="GET", body=None, nonce=None, timeout=30):
+    """One gateway call. Raises GatewayError carrying status + detail, never the key."""
+    if not GATEWAY_BASE:
+        raise GatewayError("TASKBUS_GATEWAY_BASE is not set. It is per-node "
+                           "configuration (the host unit supplies it); there is no "
+                           "built-in default because it is internal addressing.")
+    url = GATEWAY_BASE + path
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", "Bearer " + agent_api_key())
+    req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", GATEWAY_UA)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    if nonce:
+        req.add_header("X-Claim-Nonce", nonce)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode()
+            return json.loads(raw) if raw.strip() else {}
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode()[:400]
+        except Exception:
+            pass
+        raise GatewayError("%s %s -> HTTP %s %s" % (method, path, exc.code, detail)) from exc
+    except Exception as exc:
+        raise GatewayError("%s %s -> %s: %s"
+                           % (method, path, type(exc).__name__, exc)) from exc
+
+
+def gateway_rows(status="all", page_size=200):
+    """Fetch the queue through the gateway. Returns (rows, total). READ-ONLY.
+
+    Termination is driven by the gateway's own numbers, not by a page count: stop when
+    has_next is false, or when `total` rows have been collected. A page budget is only
+    a backstop, derived from `total` so a small page size cannot trip it early.
+    """
+    rows, total, page, budget = [], None, 1, 1000
+    while True:
+        d = _gw_request("/v1/taskbus/rows?status=%s&page=%d&page_size=%d"
+                        % (status, page, page_size))
+        if not isinstance(d, dict):
+            raise GatewayError("non-object response from gateway")
+        if total is None:
+            total = d.get("total", d.get("count"))
+            if isinstance(total, int) and total > 0:
+                budget = (total // max(page_size, 1)) + 3
+        batch = d.get("results") or []
+        rows.extend(batch)
+        if not d.get("has_next"):
+            break
+        if not batch:
+            # has_next says more, the page is empty: refuse to spin.
+            raise GatewayError("gateway reported has_next on an empty page %d" % page)
+        if isinstance(total, int) and total > 0 and len(rows) >= total:
+            break
+        page += 1
+        if page > budget:
+            raise GatewayError("pagination did not terminate within %d pages "
+                               "(total=%s, page_size=%d)" % (budget, total, page_size))
+    return rows, (total if total is not None else len(rows))
+
+
+def gateway_claim(row_id):
+    """Claim a row. Returns the gateway's claim record, including the nonce."""
+    return _gw_request("/v1/taskbus/rows/%d/claim" % row_id, method="POST", body={})
+
+
+def gateway_patch(row_id, body, nonce=None):
+    """Nonce-guarded write-back. The caller must already hold the claim."""
+    return _gw_request("/v1/taskbus/rows/%d" % row_id, method="PATCH",
+                       body=body, nonce=nonce)
+
+
+# ---------------------------------------------------------------- nonce store
+# A claim is made in one cycle and written back in a later one, so the nonce must
+# survive the process. It is NOT an API key: it authenticates nothing on its own, it
+# is bound to one row and is only valid while that row's lease is live.
+NONCE_STORE = os.path.join(HOME, ".bare-ai", "taskbus-nonces.json")
+
+
+def _nonce_load():
+    try:
+        with open(NONCE_STORE) as fh:
+            data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _nonce_save(data):
+    tmp = NONCE_STORE + ".tmp"
+    try:
+        with open(tmp, "w") as fh:
+            json.dump(data, fh)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, NONCE_STORE)
+    except OSError as exc:
+        log("could not persist claim nonces: %s" % exc, "WARN")
+
+
+def nonce_put(rid, nonce):
+    if not nonce:
+        return
+    data = _nonce_load()
+    data[str(rid)] = {"nonce": nonce, "ts": int(time.time())}
+    _nonce_save(data)
+
+
+def nonce_get(rid):
+    rec = _nonce_load().get(str(rid)) or {}
+    return rec.get("nonce") or ""
+
+
+def nonce_drop(rid):
+    data = _nonce_load()
+    if data.pop(str(rid), None) is not None:
+        _nonce_save(data)
+
+
 class TaskBus:
     def __init__(self, dry_run=True):
         env = load_env()
@@ -491,28 +728,111 @@ class TaskBus:
         raise RuntimeError(last or "request failed")
 
     def all_rows(self):
-        rows, page = [], 1
-        while True:
-            d = self._req("/api/database/rows/table/%d/?user_field_names=true&size=200&page=%d"
-                          % (TABLE, page))
-            rows.extend(d["results"])
-            if not d.get("next"):
-                break
-            page += 1
+        # TICKET 332: the queue is read from the gateway, not from table 215.
+        rows, _total = gateway_rows(status="all", page_size=200)
         return rows
 
     def get_row(self, rid):
-        return self._req("/api/database/rows/table/%d/%d/?user_field_names=true" % (TABLE, rid))
+        # TICKET 332: single-row reads go through the gateway as well, so the
+        # re-read before a claim cannot diverge from what the gateway will act on.
+        return _gw_request("/v1/taskbus/rows/%d" % rid)
 
-    def patch(self, rid, payload, why):
+    def patch(self, rid, payload, why, allow_reclaim=True):
         if self.dry_run:
-            log("DRY-RUN  would PATCH row %s: %s   (%s)" % (rid, json.dumps(payload), why))
+            log("DRY-RUN  would PATCH row %s via gateway: %s   (%s)"
+                % (rid, json.dumps(payload), why))
             return None
-        out = self._req("/api/database/rows/table/%d/%d/?user_field_names=true" % (TABLE, rid),
-                        method="PATCH", payload=payload)
+        body = dict(payload)
+        for field in GATEWAY_FORBIDDEN_FIELDS:
+            if field in body:
+                log("row %s: dropping dispatcher-owned field %r from a gateway write"
+                    % (rid, field), "WARN")
+                body.pop(field, None)
+        if body.get("status") == "Completed":
+            # TICKET 332: this poller may never ask for Completed. An executor's
+            # terminal state is HumanReviewNeeded; only the dispatcher completes a
+            # row, and only with independent verification evidence.
+            log("row %s: REFUSING to write Completed - executor terminal state is "
+                "HumanReviewNeeded" % rid, "ERROR")
+            body["status"] = "HumanReviewNeeded"
+        if body.get("status") and body["status"] not in GATEWAY_WRITABLE_STATUSES:
+            log("row %s: refusing to write status %r - the gateway only accepts %s "
+                "from an executor"
+                % (rid, body["status"], ", ".join(GATEWAY_WRITABLE_STATUSES)), "ERROR")
+            return None
+        if (body.get("status") in ("Blocked", "HumanReviewNeeded")
+                and not body.get("re_opened_or_retry_reason")):
+            # The gateway requires a reason for these transitions; `why` already
+            # describes what happened, so reuse it rather than inventing another.
+            body["re_opened_or_retry_reason"] = why
+        if not body:
+            log("row %s: nothing writable left after the field policy - not sent" % rid,
+                "WARN")
+            return None
+        try:
+            out = self._gateway_write(rid, body, allow_reclaim)
+        except GatewayError as exc:
+            # Expected when this poller does not hold the claim (another machine owns
+            # the row) or when the lease is gone. Leave the row untouched and keep
+            # the cycle alive rather than crashing the daemon.
+            log("row %s: gateway REFUSED the write: %s" % (rid, str(exc)[:220]), "ERROR")
+            return None
         self.writes += 1
-        log("WROTE    row %s: %s   (%s)" % (rid, json.dumps(payload), why))
+        log("WROTE    row %s via gateway: %s   (%s)" % (rid, json.dumps(body), why))
         return out
+
+    def _gateway_write(self, rid, body, allow_reclaim=True):
+        """PATCH with the stored claim nonce.
+
+        allow_reclaim is FALSE for terminal writes: a lapsed lease must not be
+        re-claimed just to append a closing note, because that spends an attempt and
+        is exactly the late-close write ticket 332 forbids.
+        """
+        try:
+            return gateway_patch(rid, body, nonce=nonce_get(rid))
+        except GatewayError as exc:
+            text = str(exc)
+            lapsed = ("lease" in text.lower()
+                      or "claim has been released" in text
+                      or "claim nonce" in text
+                      or "No usable claim stamp" in text)
+            if not lapsed or not allow_reclaim:
+                raise
+            log("row %s: claim no longer usable (%s) - reclaiming for a fresh nonce"
+                % (rid, text[:120]), "WARN")
+            claim = gateway_claim(rid)
+            nonce = claim.get("nonce") or ""
+            nonce_put(rid, nonce)
+            return gateway_patch(rid, body, nonce=nonce)
+
+    def claim(self, rid, job_task_id, note):
+        """Claim via POST /claim, then attach this poller's job id and note.
+
+        The gateway owns status=InProgress, attempts_taken+1, start_task_at,
+        claimed_by_machine, claim_nonce_hash and lease_expires_at. This client sends
+        none of those - that is the whole point of the cutover.
+        """
+        if self.dry_run:
+            log("DRY-RUN  would CLAIM row %s via gateway (%s)" % (rid, job_task_id))
+            return False, "dry-run"
+        try:
+            claim = gateway_claim(rid)
+        except GatewayError as exc:
+            return False, str(exc)[:300]
+        nonce = claim.get("nonce") or ""
+        if not nonce:
+            return False, "gateway returned no claim nonce"
+        nonce_put(rid, nonce)
+        self.writes += 1
+        log("CLAIMED  row %s via gateway: attempt %s"
+            % (rid, claim.get("attempts_taken")))
+        try:
+            gateway_patch(rid, {"corresponding_machine_task_id": job_task_id,
+                                "machines_response": note}, nonce=nonce)
+        except GatewayError as exc:
+            log("row %s: claimed, but the follow-up note failed: %s"
+                % (rid, str(exc)[:200]), "WARN")
+        return True, "attempts=%s" % claim.get("attempts_taken")
 
 
 # --------------------------------------------------------------- row accessors
@@ -1255,6 +1575,84 @@ def completion_guard(row, node=None, exit_code=None):
 
 # ------------------------------------------------------------------- note helper
 
+TRIM_CHARS = set(chr(34) + chr(39) + "()[]<>,;:.")
+DELIVERABLE_WORDS = ("report", "deliverable", "artefact", "artifact", "commit",
+                     "bundle", "script", "manifest", "patch")
+DELIVERABLE_EXTS = (".py", ".sh", ".md", ".json", ".ts", ".js", ".txt", ".log",
+                    ".csv", ".yml", ".yaml", ".conf", ".service")
+
+
+def _plain_words(text):
+    """Split on whitespace and strip surrounding punctuation. No regex, on purpose."""
+    out = []
+    for raw in text.split():
+        w = raw
+        while w and w[0] in TRIM_CHARS:
+            w = w[1:]
+        while w and w[-1] in TRIM_CHARS:
+            w = w[:-1]
+        if w:
+            out.append(w.lower())
+    return out
+
+
+def named_deliverable(row):
+    """TICKET 332. Does this row name a concrete artefact it must produce?
+
+    A path token, a known file extension, or a deliverable word all count. A URL does
+    not: probing an endpoint produces no artefact on the node, so exit_zero is the
+    only thing such a row could ever be graded on.
+    """
+    text = " ".join(str(row.get(k) or "") for k in
+                    ("short_description", "description", "ai_prompt"))
+    words = _plain_words(text)
+    for w in words:
+        if "://" in w:
+            continue
+        if w.startswith("/") or w.startswith("~") or w.startswith("./"):
+            return True
+        if w.endswith(DELIVERABLE_EXTS):
+            return True
+    return any(w in DELIVERABLE_WORDS for w in words)
+
+
+def exit_zero_ban_verdict(row):
+    """(ok, why). Refuse exit_zero when the row names a real deliverable.
+
+    exit_zero is self-fulfilling: a job that does nothing and exits 0 grades as
+    Passed. It may stand as the criterion ONLY for a row that produces no artefact.
+    """
+    crit = str(fval(row, "success_criterion") or "").strip().lower()
+    parts = [p for p in crit.replace(";", " ").split() if p]
+    if parts != ["exit_zero"]:
+        return True, "not an exit_zero-only criterion"
+    if named_deliverable(row):
+        return False, ("success_criterion is exit_zero but the row names a deliverable. "
+                       "exit_zero cannot prove work happened; author a real check "
+                       "(file_exists, file_md5, file_sha256, http_200, http_status or "
+                       "git_ls_remote) or name a verifier on the row.")
+    return True, "exit_zero on a row that names no deliverable"
+
+
+def lease_live(row, now=None):
+    """TICKET 332. True while the gateway's lease on this row is still live.
+
+    A row with no lease field is treated as live: that is the pre-cutover shape and
+    the dry-run shape, and the gateway remains the authority that may refuse a write.
+    """
+    raw = fval(row, "lease_expires_at")
+    if not raw:
+        return True
+    s = str(raw).strip().replace("Z", "+00:00")
+    try:
+        ts = datetime.fromisoformat(s)
+    except ValueError:
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts > (now or now_utc())
+
+
 def append_note(existing, line):
     stamp = now_utc().strftime("%Y-%m-%d %H:%MZ")
     chunk = "[%s] %s" % (stamp, line)
@@ -1703,6 +2101,14 @@ class Poller:
         """
         rid = row["id"]
         fresh = self.bus.get_row(rid)
+        # TICKET 332: respect the lease. Once it has lapsed the claim is gone, so a
+        # closing write would be a late close (and the gateway would refuse it).
+        if not lease_live(fresh):
+            log("row %s: lease already expired at %s - NOT writing a late close"
+                % (rid, fval(fresh, "lease_expires_at")), "WARN")
+            self.record("outcome-lease-expired", rid,
+                        "lease lapsed before the outcome write")
+            return
         if st(fresh) == "Cancelled":
             log("row %s is Cancelled - not reporting a job outcome" % rid)
             self.record("outcome-skipped-cancelled", rid, "row cancelled mid-flight")
@@ -1715,11 +2121,14 @@ class Poller:
             allowed, reasons, ver_evidence = completion_guard(
                 fresh, node=node, exit_code=state.get("exit_code"))
             if allowed:
-                status_target = "Completed"
-                # The dispatcher's ATTESTATION. Written here, and ONLY on a pass.
-                attest = {"verification_result": "Passed", "verified_by": ME}
-                head = ("job finished (exit 0); dispatcher INDEPENDENT verification "
-                        "PASSED -> wrote verification_result=Passed, verified_by=%s" % ME)
+                # TICKET 332: an executor NEVER completes a row. The independent
+                # verification having passed is recorded as EVIDENCE for the
+                # dispatcher; it is not a terminal state. Completed is dispatcher-only
+                # and is never requested from this poller.
+                status_target = "HumanReviewNeeded"
+                head = ("job finished (exit 0); dispatcher-side verification PASSED and "
+                        "its evidence is recorded below. Terminal state is "
+                        "HumanReviewNeeded - Completed is the dispatcher's decision.")
             else:
                 status_target = "HumanReviewNeeded"
                 head = ("job finished (exit 0) but the completion guard did NOT pass "
@@ -1729,19 +2138,22 @@ class Poller:
                          % node) + "\n".join(ver_evidence)
         elif state.get("exit_code") == 75:
             # EX_TEMPFAIL: infrastructure could not run the task, so it was never
-            # attempted. Do NOT Block it and do NOT consume the attempt - undo the
-            # increment the claim made, and put it back to New. Without this, a
-            # missing credential silently Blocks real tasks one per cycle.
-            back = max(num(fresh, "attempts_taken", 1) - 1, 0)
+            # attempted and must not be Blocked. The gateway owns attempts_taken and
+            # the lease, so the poller appends the note and leaves the requeue to the
+            # lease rather than writing status or refunding a count it does not own.
             note = append_note(fresh.get("machines_response"),
-                               "TEMPFAIL: executor could not run (exit 75). Attempt "
-                               "refunded; the task was NOT attempted.\n"
+                               "TEMPFAIL: executor could not run (exit 75); the task "
+                               "was NOT attempted. The claim is left to the gateway lease.\n"
                                "--- executor output (tail) ---\n" + job_log_tail(job_uuid_of(fresh)))
-            self.bus.patch(rid, {"status": "New", "attempts_taken": back,
+            # TICKET 332: the gateway refuses "New" and owns attempts_taken, so this
+            # keeps the row InProgress and lets the lease requeue it. Nothing is
+            # refunded locally because the poller no longer counts attempts.
+            self.bus.patch(rid, {"status": "InProgress",
                                  "corresponding_machine_task_id": "",
                                  "machines_response": note},
-                           "TEMPFAIL -> requeue, attempt refunded")
-            self.record("outcome-tempfail", rid, "exit 75, refunded to attempts=%d" % back)
+                           "TEMPFAIL -> note appended; the gateway lease requeues")
+            self.record("outcome-tempfail", rid,
+                        "exit 75; note appended, requeue is the gateway lease's job")
             return
         else:
             status_target = "Blocked"
@@ -1750,7 +2162,9 @@ class Poller:
                            head + "\n--- executor output (tail) ---\n" + tail)
         payload = {"status": status_target, "machines_response": note}
         payload.update(attest)
-        self.bus.patch(rid, payload, "job terminal -> %s" % status_target)
+        # allow_reclaim=False: never re-claim a row just to close it out.
+        self.bus.patch(rid, payload, "job terminal -> %s" % status_target,
+                       allow_reclaim=False)
         self.record("outcome-" + status_target.lower(), rid, head[:90])
 
     # ---- phase 1: reconcile stuck tasks (runs BEFORE intake)
@@ -1823,9 +2237,13 @@ class Poller:
                                "stuck: InProgress with %.0f min idle and no live job; "
                                "remediating (claims used %s/%s)" % (age_min, taken, cap))
             if taken < cap:
-                self.bus.patch(rid, {"status": "New", "machines_response": note},
-                               "stuck -> requeue as New (claims used %s/%s)" % (taken, cap))
-                self.record("stuck-requeue", rid, "claims used %s/%s" % (taken, cap))
+                # TICKET 332: the gateway refuses "New" to an executor and owns the
+                # lease, so requeueing is the gateway's job. This appends the evidence
+                # and releases nothing locally.
+                self.bus.patch(rid, {"machines_response": note},
+                               "stuck: evidence appended, requeue is the gateway's job")
+                self.record("stuck-requeue-deferred", rid,
+                            "claims used %s/%s; gateway lease requeues" % (taken, cap))
             else:
                 self.bus.patch(rid, {"status": "Blocked", "machines_response": note},
                                "stuck and the total-claim cap is reached -> Blocked")
@@ -1955,6 +2373,20 @@ class Poller:
                 continue
 
 
+            # ---- TICKET 332: exit_zero BAN (before any budget is spent) ----
+            zok, zwhy = exit_zero_ban_verdict(fresh)
+            if not zok:
+                if not self.live:
+                    log("DRY-RUN  would BLOCK row %s: %s" % (rid, zwhy))
+                    self.record("would-block-exit-zero", rid, zwhy)
+                    continue
+                note = append_note(fresh.get("machines_response"),
+                                   "claim refused: " + zwhy)
+                self.bus.patch(rid, {"status": "Blocked", "machines_response": note},
+                               "exit_zero criterion on a row with a named deliverable")
+                self.record("claim-blocked-exit-zero", rid, zwhy)
+                continue
+
             # ---- FAIL-CLOSED CLAIM CAP GATE (added 2026-09-14, defect row 82) ----
             # A row may be CLAIMED only while attempts_taken is BELOW max_attempts.
             # Before this gate the cap was read purely to format a note, so
@@ -1998,6 +2430,14 @@ class Poller:
                             "no executor in " + EXEC_CONF)
                 continue
 
+            # TICKET 332: the kill switch is checked BEFORE EVERY claim attempt, not
+            # only once per cycle, so a pause written mid-cycle still stops the claim.
+            if self.paused():
+                log("KILL SWITCH present (%s) - stopping before the claim of row %s"
+                    % (KILL_SWITCH, rid), "WARN")
+                self.record("paused-before-claim", rid, "kill switch appeared")
+                break
+
             juuid = "td-taskbus-" + uuidlib.uuid4().hex[:12]
             # THE single increment site. Counts CLAIMS, so max_attempts caps the
             # TOTAL number of claims (liege directive 2026-09-12), matching row 5
@@ -2005,16 +2445,20 @@ class Poller:
             # reconcile() must never increment as well - doing so previously
             # double-counted and let attempts_taken exceed max_attempts (proven on
             # row 66: values 1, 2, 3 against a cap of 2).
-            taken = num(fresh, "attempts_taken", 0) + 1
-            self.bus.patch(rid, {
-                "status": "InProgress",
-                "attempts_taken": taken,
-                "corresponding_machine_task_id": "job:" + juuid,
-                "machines_response": append_note(
-                    fresh.get("machines_response"),
-                    "claimed by %s; dispatch job %s; retries used %s of %s"
-                    % (ME, juuid, taken, num(fresh, "max_attempts", DEFAULT_MAX_ATTEMPTS)))},
-                "claim -> InProgress")
+            # TICKET 332: the claim is the GATEWAY's. It writes status=InProgress,
+            # attempts_taken+1, start_task_at, claimed_by_machine, claim_nonce_hash
+            # and lease_expires_at, and hands back the nonce every later write needs.
+            claim_note = append_note(
+                fresh.get("machines_response"),
+                "claimed by %s via gateway; dispatch job %s; retries used %s of %s"
+                % (ME, juuid, num(fresh, "attempts_taken", 0) + 1,
+                   num(fresh, "max_attempts", DEFAULT_MAX_ATTEMPTS)))
+            claimed_ok, claim_detail = self.bus.claim(rid, "job:" + juuid, claim_note)
+            if not claimed_ok:
+                self.record("claim-refused", rid, claim_detail)
+                log("row %s: gateway claim REFUSED (%s) - skipping this cycle"
+                    % (rid, claim_detail), "WARN")
+                continue
             desc = (fresh.get("short_description") or "").upper()
             is_fixture = any(m.upper() in desc for m in FIXTURE_MARKERS)
             self.record("claimed-fixture" if is_fixture else "claimed", rid, juuid)
@@ -2172,6 +2616,10 @@ def main():
     ap.add_argument("--complete-check", type=int, metavar="ROW",
                     help="independently verify a row's success_criterion on its target "
                          "node and print the verdict (NOTE: this now PROBES the node)")
+    ap.add_argument("--gateway-claim", type=int, metavar="ROW",
+                    help="claim ROW through the gateway, prove the nonce on a "
+                         "follow-up write, and exit (ticket 332 functional probe; "
+                         "prints no secret)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--executor", metavar="PATH",
                     help="executor script invoked as <executor> <row_id> on claim")
@@ -2241,6 +2689,27 @@ def main():
                           "refusal_reasons": reasons,
                           "self_verification_evidence": evidence}, indent=2))
         return 0 if allowed else 3
+
+    if args.gateway_claim:
+        # TICKET 332 functional probe. Claims the row through the gateway and proves
+        # the returned nonce is accepted on a follow-up PATCH. The nonce itself is
+        # reported only as a length and a hash prefix.
+        claim = gateway_claim(args.gateway_claim)
+        nonce = claim.get("nonce") or ""
+        follow = gateway_patch(args.gateway_claim, {
+            "corresponding_machine_task_id": "job:ticket-332-probe",
+            "machines_response": "ticket 332 gateway probe: claim nonce accepted",
+        }, nonce=nonce)
+        print(json.dumps({
+            "row": args.gateway_claim,
+            "claim": {k: v for k, v in claim.items() if k != "nonce"},
+            "nonce_len": len(nonce),
+            "nonce_sha256_prefix": (__import__("hashlib").sha256(nonce.encode())
+                                    .hexdigest()[:16] if nonce else None),
+            "write_back": {k: follow.get(k) for k in
+                           ("row_id", "updated_fields", "status", "claimed_by_machine")},
+        }, indent=2))
+        return 0
 
     LEASE_MINUTES = args.lease_minutes
     MAX_PER_CYCLE = args.max_per_cycle
