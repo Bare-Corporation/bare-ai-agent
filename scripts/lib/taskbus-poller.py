@@ -1774,6 +1774,45 @@ def stale_sweep(rows, now=None, stale_days=None):
 
 # -------------------------------------------------------------------- the poller
 
+def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None):
+    """PURE: may this row be claimed at `now`? start_task_at plus peak pricing.
+
+    Returns (ok, kind, detail). ok=False means DO NOT claim, with a reason.
+
+    Module-level and side-effect free so the rule can be unit-tested without a bus
+    or a clock, and so exactly ONE rule serves both the cycle snapshot and the
+    fresh re-read (ticket 76).
+
+    start_task_at semantics changed 2026-10-31: the gateway CLEARS the stamp when a
+    claim is released (offboard). A released row therefore carries no stamp and must
+    be claimable at once. The gate must be evaluated against CURRENT row state - if
+    it is evaluated against a snapshot taken earlier in the cycle, the cleared stamp
+    is shadowed by the stale copy and the row is suppressed until the next cycle.
+    """
+    policy = activity_policy if activity_policy is not None else ACTIVITY_POLICY
+    windows = avoid_windows if avoid_windows is not None else GLOBAL_AVOID_WINDOWS
+    due = parse_baserow_ts(row.get("start_task_at"))
+    if due and now < due:
+        return False, "not-yet-due", "start_task_at=%s" % due.strftime("%Y-%m-%dT%H:%MZ")
+    if policy != "avoid_peak":
+        return True, "ok", "policy=none"
+    # Liege directive 2026-10-24: HIGH priority work bypasses the global avoid
+    # window and runs regardless of the hour. Cost protection is unchanged for
+    # every other priority (medium/low/blank still wait for off-peak).
+    if str(fval(row, "priority") or "").strip().lower() == "high":
+        return True, "ok", "priority=high bypasses the global avoid window"
+    # GLOBAL window governs. The per-row rate rule is still parsed, but only for
+    # reporting - it no longer gates, so an unparseable or missing rule can no longer
+    # affect when jobs run.
+    if in_peak(now, windows):
+        nxt = next_offpeak(now, windows)
+        return False, "peak-defer", ("inside the global avoid window (00:00-14:00 UTC); "
+                                     "next runnable %s"
+                                     % (nxt.strftime("%Y-%m-%dT%H:%MZ") if nxt else "?"))
+    wins, _status = parse_peak_windows(row.get("special_ai_agent_calculation_rule"))
+    return True, "ok", ("runnable; row rule parsed windows=%d" % len(wins))
+
+
 class Poller:
     def __init__(self, bus, live=False):
         self.bus = bus
@@ -2068,28 +2107,13 @@ class Poller:
     # READ-ONLY LOOKUP, so the API silently ignores attempts to seed it. The rule only
     # appears once a model is chosen on the row.
     def schedule_verdict(self, row, now=None):
-        """Returns (ok, kind, detail). ok=False means DO NOT claim, with a reason."""
-        now = now or now_utc()
-        due = parse_baserow_ts(row.get("start_task_at"))
-        if due and now < due:
-            return False, "not-yet-due", "start_task_at=%s" % due.strftime("%Y-%m-%dT%H:%MZ")
-        if ACTIVITY_POLICY != "avoid_peak":
-            return True, "ok", "policy=none"
-        # Liege directive 2026-10-24: HIGH priority work bypasses the global avoid
-        # window and runs regardless of the hour. Cost protection is unchanged for
-        # every other priority (medium/low/blank still wait for off-peak).
-        if str(fval(row, "priority") or "").strip().lower() == "high":
-            return True, "ok", "priority=high bypasses the global avoid window"
-        # GLOBAL window governs. The per-row rate rule is still parsed, but only for
-        # reporting - it no longer gates, so an unparseable or missing rule can no longer
-        # affect when jobs run.
-        if in_peak(now, GLOBAL_AVOID_WINDOWS):
-            nxt = next_offpeak(now, GLOBAL_AVOID_WINDOWS)
-            return False, "peak-defer", ("inside the global avoid window (00:00-14:00 UTC); "
-                                         "next runnable %s"
-                                         % (nxt.strftime("%Y-%m-%dT%H:%MZ") if nxt else "?"))
-        wins, _status = parse_peak_windows(row.get("special_ai_agent_calculation_rule"))
-        return True, "ok", ("runnable; row rule parsed windows=%d" % len(wins))
+        """Delegate to the pure rule so snapshot and fresh reads cannot diverge.
+
+        ticket 76: the body moved to schedule_verdict_at() so it is unit-testable
+        and so a release clearing start_task_at is honoured on the fresh re-read.
+        """
+        return schedule_verdict_at(row, now or now_utc(), ACTIVITY_POLICY,
+                                   GLOBAL_AVOID_WINDOWS)
 
     # ---- terminal jobs: report the outcome (scope section 6)
     def report_outcome(self, row, state, target=None):
@@ -2311,13 +2335,10 @@ class Poller:
                 self.record("target-not-dispatchable", rid, why)
                 continue
 
-            # ---- SCHEDULING GATE (start_task_at + peak/off-peak), deterministic
-            vok, vkind, vdetail = self.schedule_verdict(row)
-            if not vok:
-                log("row %s: %s (%s) - not claiming" % (rid, vkind, vdetail))
-                self.record(vkind, rid, vdetail)
-                continue
-            due = None
+            # ---- SCHEDULING GATE: evaluated further down, on the FRESH row
+            # (ticket 76). It must not run on this cycle snapshot: a release clears
+            # start_task_at at the gateway, and a stale copy of that stamp would
+            # otherwise suppress a row that is immediately claimable again.
 
             ok, bad, blocking = self.deps_verdict(row, index)
             if not ok:
@@ -2342,6 +2363,15 @@ class Poller:
             if st(fresh) not in CLAIMABLE_STATUSES:
                 log("row %s changed to %s between scan and claim - skipping" % (rid, st(fresh)))
                 self.record("claim-race", rid, "status was %s at re-read" % st(fresh))
+                continue
+            # ---- SCHEDULING GATE (ticket 76): start_task_at + peak/off-peak,
+            # evaluated on the row as it is NOW. Re-checking here is the fix: the
+            # gateway clears start_task_at when a claim is released, so a released
+            # row must be claimable inside the same cycle that saw it released.
+            vok, vkind, vdetail = self.schedule_verdict(fresh)
+            if not vok:
+                log("row %s: %s (%s) - not claiming" % (rid, vkind, vdetail))
+                self.record(vkind, rid, vdetail)
                 continue
             if not (fresh.get("ai_prompt") or "").strip():
                 log("row %s has no ai_prompt - refusing to act on an unread/empty task" % rid)
