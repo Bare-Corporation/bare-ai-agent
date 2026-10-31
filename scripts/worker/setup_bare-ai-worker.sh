@@ -1578,6 +1578,45 @@ if command -v curl >/dev/null 2>&1; then
     fi
 fi
 
+# --- 10.2 UNTRACKED-FILE SECRET GATE (ticket 282) ---
+# A pre-commit hook only ever sees STAGED content. A file an agent WROTE and never added
+# is invisible to it, which is how a key sat untracked on a node and was read 37 times.
+# This installs a daily USER timer that scans exactly those files. Non-fatal by design: a
+# node missing the artefacts still installs, it simply does not get the gate, and says so.
+SECRET_SCAN_SH="$REPO_DIR/scripts/worker/bare-untracked-secret-scan.sh"
+SECRET_UNIT_SRC="$REPO_DIR/scripts/systemd"
+SECRET_USER_UNIT_DIR="$TARGET_HOME/.config/systemd/user"
+if [ -f "$SECRET_SCAN_SH" ] && [ -f "$SECRET_UNIT_SRC/bare-untracked-secret-scan.timer" ]; then
+    chmod +x "$SECRET_SCAN_SH" 2>/dev/null || true
+    mkdir -p "$SECRET_USER_UNIT_DIR"
+    install -m 0644 "$SECRET_UNIT_SRC/bare-untracked-secret-scan.service" "$SECRET_USER_UNIT_DIR/bare-untracked-secret-scan.service"
+    install -m 0644 "$SECRET_UNIT_SRC/bare-untracked-secret-scan.timer" "$SECRET_USER_UNIT_DIR/bare-untracked-secret-scan.timer"
+    # The scan separates 0 clean / 1 findings / 2 tooling problem on purpose. A missing
+    # gitleaks is therefore a FAILED RUN every night, not a silent "clean" - say so here.
+    if [ -x "$TARGET_HOME/.local/bin/gitleaks" ] || command -v gitleaks >/dev/null 2>&1; then
+        echo -e "${GREEN}OK: untracked-secret scan installed (daily user timer)${NC}"
+    else
+        echo -e "${RED}WARNING: gitleaks is not on PATH - the untracked-secret scan will exit 2 (tooling) on every run.${NC}"
+        echo -e "${YELLOW}         Install gitleaks into $TARGET_HOME/.local/bin to activate the gate.${NC}"
+    fi
+    if command -v loginctl >/dev/null 2>&1; then
+        execute_command "sudo loginctl enable-linger \"$TARGET_USER\"" "Enable user lingering for the secret-scan timer"
+    fi
+    # Resolve the uid through a file: no command substitution, so this stays readable
+    # and cannot be mangled by shell quoting in either direction.
+    SECRET_UID_TMP="/tmp/bare-ai-secret-scan-uid.$$"
+    echo 1000 > "$SECRET_UID_TMP"
+    id -u "$TARGET_USER" > "$SECRET_UID_TMP" 2>/dev/null || true
+    read -r SECRET_UID < "$SECRET_UID_TMP" || SECRET_UID=1000
+    rm -f "$SECRET_UID_TMP"
+    [ -n "$SECRET_UID" ] || SECRET_UID=1000
+    execute_command "sudo -u \"$TARGET_USER\" XDG_RUNTIME_DIR=\"/run/user/$SECRET_UID\" systemctl --user daemon-reload" "Reload user systemd units"
+    # Enable the TIMER. Enabling the oneshot service alone installs a unit that never fires,
+    # which is the "looks installed, does nothing" failure this gate exists to prevent.
+    execute_command "sudo -u \"$TARGET_USER\" XDG_RUNTIME_DIR=\"/run/user/$SECRET_UID\" systemctl --user enable --now bare-untracked-secret-scan.timer" "Enable the daily untracked-secret scan timer"
+else
+    echo -e "${YELLOW}SKIP: untracked-secret scan artefacts not found under $REPO_DIR - gate not installed.${NC}"
+fi
 # --- 10. COMPLETE ---
 echo -e "\n${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}✅ BARE-AI-AGENT WORKER SETUP COMPLETE${NC}"
