@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""taskbus-poller.py - Task-Bus Poller / Watchdog for bare-ai-brain@100.64.0.4
+"""taskbus-poller.py - Task-Bus Poller / Watchdog for a fleet dispatcher node
 
 Implements docs-taskbus-poller-scope-2026-09-12.md.
 
@@ -60,7 +60,7 @@ TABLE = 215
 # it is, or it treats itself as remote, attempts an ssh it cannot make, and stamps
 # verified_by with another machine's name. Default preserves the original value.
 # IDENTITY IS NOT OPTIONAL (ticket 275). This used to fall back to a hardcoded
-# "bare-ai-brain@100.64.0.4", so a node started without POLLER_SELF_NODE attested its
+# node string, so a node started without POLLER_SELF_NODE attested its
 # verdicts as if THIS node had graded them. Refuse to run instead: a poller that cannot
 # name itself must not grade anything.
 ME = os.environ.get("POLLER_SELF_NODE", "").strip()
@@ -89,20 +89,81 @@ LOCAL_RUNNER = os.environ.get(
 REMOTE_DISPATCHER = "/home/bare-ai/.bare-ai/lib/dispatch-job.sh"
 REMOTE_RUNNER = "/home/bare-ai/.bare-ai/lib/taskbus-agent-job.py"
 
-# Only machines .4 can actually dispatch to. .1 (council-ingress) is deliberately ABSENT:
-# the role file records that .4 has no key for it, so .1-assigned rows are left alone
-# rather than claimed and then failed. Proxmox-manager also lives on .4, so the map is by
-# machine name -> node, not one row per node.
-DISPATCHABLE = {
-    "bare-ai-secrets-manager@100.64.0.2": "100.64.0.2",
-    "bare-ai-brain@100.64.0.4": "100.64.0.4",
-    "bare-ai-proxmox-manager@100.64.0.4": "100.64.0.4",
-    "bare-ai-headscale-manager@100.64.0.5": "100.64.0.5",
-    "bare-ai-developer@100.64.0.11": "100.64.0.11",
-    "bare-ai-council-manager@100.64.0.13": "100.64.0.13",
-    "bare-ai-bare-connectfi-manager@100.64.0.18": "100.64.0.18",
-    "bare-ai-bare-ai.net-and-baserow-manager@100.64.0.19": "100.64.0.19",
-}
+# ------------------------------------------------ DISPATCH MAP (CONFIGURATION, NOT CODE)
+# WHY THIS IS NOT A TABLE IN THE SOURCE (2026-11-01): this repository is PUBLIC, and a map of
+# node hostnames to overlay addresses is internal fleet data. It was removed from the source
+# and is loaded from the node's own untracked configuration instead, in this order:
+#   1. BARE_TASKBUS_DISPATCHABLE        - a JSON object in the environment
+#   2. ~/.bare-ai/taskbus-machines.json - the same JSON in a file that host owns
+# If neither is present this poller FAILS CLOSED. An empty map is worse than a crash: it
+# silently stops dispatch and unreachable-node reconciliation, so the bus looks quiet rather
+# than broken. Which machine can be reached is NOT inferred from its name - a hostname proves
+# nothing about reachability, and guessing would claim rows this host cannot run.
+DISPATCH_ENV = "BARE_TASKBUS_DISPATCHABLE"
+DISPATCH_FILE = os.path.join(HOME, ".bare-ai", "taskbus-machines.json")
+
+
+class DispatchConfigError(RuntimeError):
+    '''The dispatch map is absent, unreadable or malformed. Never continue without it.'''
+
+
+def load_dispatchable(env=None, path=None):
+    '''Load {'name@address': 'address'}. FAILS CLOSED (see the block comment above).
+
+    Accepts a JSON object, or a JSON list of 'name@address' strings whose address part is
+    used as the node, so an operator can paste the shape already kept in table 43.
+    '''
+    env = os.environ if env is None else env
+    path = DISPATCH_FILE if path is None else path
+    raw, source = None, None
+    blob = (env.get(DISPATCH_ENV) or "").strip()
+    if blob:
+        raw, source = blob, DISPATCH_ENV
+    elif os.path.exists(path):
+        try:
+            with open(path) as fh:
+                raw = fh.read()
+        except OSError as exc:
+            raise DispatchConfigError(
+                "cannot read %s (%s); fix its permissions or use %s"
+                % (path, exc, DISPATCH_ENV))
+        source = path
+    else:
+        raise DispatchConfigError(
+            "no dispatch map configured: set %s to a JSON object or create %s. "
+            "Refusing to run without it - an empty map silently stops dispatch and "
+            "unreachable-node reconciliation." % (DISPATCH_ENV, path))
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise DispatchConfigError(
+            "dispatch map from %s is not valid JSON (%s)" % (source, exc))
+    if isinstance(data, list):
+        data = {str(item).strip(): "" for item in data}
+    if not isinstance(data, dict) or not data:
+        raise DispatchConfigError(
+            "dispatch map from %s must be a non-empty JSON object mapping "
+            "'name@address' to address" % source)
+    out = {}
+    for key, node in data.items():
+        key = str(key).strip()
+        node = str(node or "").strip() or key.partition("@")[2]
+        if not key or not node:
+            raise DispatchConfigError(
+                "dispatch map entry %r from %s carries no address; expected "
+                "'name@address': 'address'" % (key, source))
+        out[key] = node
+    return out
+
+
+try:
+    DISPATCHABLE = load_dispatchable()
+    DISPATCH_CONFIG_ERROR = ""
+except DispatchConfigError as _dispatch_exc:
+    # Do not raise at import: a traceback is not an operator message, and --status has to be
+    # able to REPORT the fault. main() refuses every other mode with exit 78.
+    DISPATCHABLE = {}
+    DISPATCH_CONFIG_ERROR = str(_dispatch_exc)
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=8"]
 
 # ---- SELF-TARGET DETECTION (added 2026-09-13) --------------------------------
@@ -676,7 +737,13 @@ def nonce_drop(rid):
 class TaskBus:
     def __init__(self, dry_run=True):
         env = load_env()
-        self.base = (env.get("BASEROW_URL") or "http://100.64.0.19").rstrip("/")
+        base = (env.get("BASEROW_URL") or os.environ.get("BASEROW_URL") or "").strip()
+        if not base:
+            raise RuntimeError(
+                "BASEROW_URL is not configured: set it in %s or in the environment. There "
+                "is no built-in default, because a wrong default makes a node look "
+                "configured while every call fails." % ENVF)
+        self.base = base.rstrip("/")
         self._jwt = None
         self.identity_email = None
         self.refresh_auth()
@@ -2655,6 +2722,12 @@ def main():
                     help="executor script invoked as <executor> <row_id> on claim")
     args = ap.parse_args()
 
+    # FAIL CLOSED on missing dispatch configuration (2026-11-01). --status still runs so an
+    # operator can see WHY, but no cycle, claim or reconciliation happens without a map.
+    if DISPATCH_CONFIG_ERROR and not args.status:
+        print("FATAL: %s" % DISPATCH_CONFIG_ERROR, file=sys.stderr)
+        return 78
+
     if args.status:
         stt = {}
         if os.path.exists(STATE_FILE):
@@ -2670,6 +2743,9 @@ def main():
                "max_per_day": MAX_PER_DAY,
                "lease_minutes": LEASE_MINUTES,
                "me": ME,
+               "dispatch_map_configured": not DISPATCH_CONFIG_ERROR,
+               "dispatch_targets": len(DISPATCHABLE),
+               "dispatch_config_error": DISPATCH_CONFIG_ERROR or None,
                "state": stt}
         print(json.dumps(out, indent=2))
         return 0

@@ -17,4 +17,4 @@ BARE_AI_ENDPOINT="https://api.anthropic.com/v1/chat/completions" BARE_AI_API_KEY
 ### 1.2.1) IBM Granite
 
 
-BARE_AI_ENDPOINT="http://100.64.0.13:11434/v1/chat/completions" BARE_AI_API_KEY="none" BARE_AI_MODEL="granite4:tiny-h" BARE_AI_NO_TOOLS="true" node $HOME/bare-ai-cli/bundle/bare-ai.js -p "tell me a joke about nerds."
+BARE_AI_ENDPOINT="http://192.0.2.13:11434/v1/chat/completions" BARE_AI_API_KEY="none" BARE_AI_MODEL="granite4:tiny-h" BARE_AI_NO_TOOLS="true" node $HOME/bare-ai-cli/bundle/bare-ai.js -p "tell me a joke about nerds."

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # BARE-AI secret-prevention pre-commit hook (Phase 3).
 # 1) Refuses to commit a non-blank role.md (live role data belongs outside the repo).
-# 2) Scans staged changes with gitleaks; blocks on any secret hit.
+# 2) Refuses ADDED lines carrying internal fleet identifiers (this repository is PUBLIC).
+# 3) Scans staged changes with gitleaks; blocks on any secret hit.
 #
 # Install (one-time, per clone):
 #   git config core.hooksPath .githooks
@@ -22,6 +23,47 @@ if ! git diff --cached --quiet -- role.md; then
   if [ -s role.md ]; then
     echo "BLOCKED: role.md must not be committed with live role data."
     echo "role.md is a symlink to ~/.bare-ai/role.md and is gitignored."
+    exit 1
+  fi
+fi
+
+# --- public-repo identifier guard (2026-11-01) -------------------------------
+# THIS REPOSITORY IS PUBLIC. Overlay addresses, node host names and node -> rep tables are
+# internal fleet data, not source material. Configuration belongs in the node's own
+# environment or an untracked file it owns - see the dispatch-map loader in
+# scripts/lib/taskbus-poller.py for the shape that replaced the hardcoded table.
+#
+# Only ADDED lines are inspected: blocking on pre-existing content would make every commit
+# fail until history was rewritten, which does not retract a leak anyway. History and
+# whole-tree coverage belong to a separate scheduled scan.
+IDENT_ADDED="$(git diff --cached -U0 --diff-filter=ACMR -- . | grep -E '^\+[^+]' || true)"
+IDENT_RE='100\.64\.[0-9]{1,3}\.[0-9]{1,3}|bare-(ai|connectfi)[a-z0-9.-]*@[0-9]'
+if [ -n "${IDENT_ADDED}" ]; then
+  IDENT_HITS="$(echo "${IDENT_ADDED}" | grep -nE "${IDENT_RE}" || true)"
+  if [ -z "${IDENT_HITS}" ]; then
+    # Optional host-name deny-list: one name per line, untracked and owned by the host.
+    # Keeping the names OUT of this file is deliberate - a guard that spells out the value
+    # it forbids blocks its own commit.
+    DENY_FILE="${HOME}/.bare-ai/public-repo-deny.txt"
+    if [ -r "${DENY_FILE}" ]; then
+      while IFS= read -r NAME; do
+        [ -z "${NAME}" ] && continue
+        case "${NAME}" in "#"*) continue ;; esac
+        HIT="$(echo "${IDENT_ADDED}" | grep -nF -- "${NAME}" || true)"
+        if [ -n "${HIT}" ]; then IDENT_HITS="${IDENT_HITS}${HIT}"; fi
+      done < "${DENY_FILE}"
+    fi
+  fi
+  if [ -n "${IDENT_HITS}" ]; then
+    echo ""
+    echo "===================================================="
+    echo "BLOCKED: internal fleet identifiers in staged additions."
+    echo "This repository is public, so these do not belong in it. Matches:"
+    echo "${IDENT_HITS}" | sed -e 's/^/  /'
+    echo "Move the value into the node's own environment or an untracked config file"
+    echo "(see scripts/lib/taskbus-poller.py for the dispatch-map loader)."
+    echo "False positive? Say so explicitly before using: git commit --no-verify"
+    echo "===================================================="
     exit 1
   fi
 fi

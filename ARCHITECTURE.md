@@ -63,7 +63,7 @@ To ensure safe autonomous execution, Agents operate under two distinct constitut
 
 ## 5. Security Posture & The "Air-Gap" Illusion
 The Sovereign architecture utilizes a **Tailscale/Headscale Mesh Overlay**.
-* **Transport:** All fleet communication (Brain -> Worker, Worker -> Vault, Worker -> Ollama) occurs via IP spaces (e.g., `100.64.x.x`).
+* **Transport:** All fleet communication (Brain -> Worker, Worker -> Vault, Worker -> Ollama) occurs over the private mesh, so addresses are documentation-style placeholders in this repo (RFC 5737 ranges such as `192.0.2.0/24`).
 * **Encryption:** By defaulting to this mesh, we achieve automated, encapsulated WireGuard encryption across the entire Data Plane, rendering local application-layer SSL termination largely cosmetic.
 
 ## 6. End-State Goal
