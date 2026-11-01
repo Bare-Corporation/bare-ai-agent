@@ -1868,9 +1868,16 @@ def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None):
     # every other priority (medium/low/blank still wait for off-peak).
     if str(fval(row, "priority") or "").strip().lower() == "high":
         return True, "ok", "priority=high bypasses the global avoid window"
-    # GLOBAL window governs. The per-row rate rule is still parsed, but only for
-    # reporting - it no longer gates, so an unparseable or missing rule can no longer
-    # affect when jobs run.
+    # FAIL CLOSED ON A MALFORMED RATE RULE (row 76, carried from the dispatcher).
+    # A row whose rule carries a time clause we cannot parse is not "no peak": we cannot
+    # tell what it means, and starting now could pay peak rates on every such row. High
+    # priority has already returned above, so that bypass is untouched.
+    _rule_wins, _rule_status = parse_peak_windows(row.get("special_ai_agent_calculation_rule"))
+    if _rule_status == "malformed":
+        return False, "rule-malformed", "special_ai_agent_calculation_rule could not be parsed"
+    # GLOBAL window governs the hour. A well-formed row rule is reported but does not narrow
+    # it; a malformed one has already been refused above, which is the only case in which
+    # the row's own rule can decide anything.
     if in_peak(now, windows):
         nxt = next_offpeak(now, windows)
         return False, "peak-defer", ("inside the global avoid window (00:00-14:00 UTC); "
