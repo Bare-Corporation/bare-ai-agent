@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """taskbus-agent-job.py - TARGET-SIDE runner for a task-bus job.
 
-Invoked on the target node by the .4 poller, via dispatch-job.sh:
+Invoked on the target node by the dispatcher's poller, via dispatch-job.sh:
     dispatch-job.sh <uuid> python3 /home/bare-ai/.bare-ai/lib/taskbus-agent-job.py <prompt_file>
 
-It runs THIS NODE'S OWN AGENT IDENTITY (its role.md + technical constitution), not .4's -
+It runs THIS NODE'S OWN AGENT IDENTITY (its role.md + technical constitution), not the dispatcher's -
 each machine should act as itself. The task text arrives in the prompt file so the target
 needs no Baserow credential of its own.
 """
@@ -23,6 +23,11 @@ CENTRAL_MODELS_URL = "https://api.bare-ai.net/v1/models"
 DEFAULT_SHORTCUT = os.environ.get("TASKBUS_MODEL_SHORTCUT", "303")
 FALLBACK_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
 FALLBACK_MODEL = "deepseek-v4-flash"
+
+# Sent as the User-Agent on every criterion check (TICKET 307). A default
+# python-urllib UA is rejected at the edge with 403, which is indistinguishable
+# from a real API 403 and made every http_status check fail.
+CHECK_UA = "bare-ai-taskbus-verifier/1.0"
 
 
 def central_route(shortcut):
@@ -87,14 +92,16 @@ def load_env(path):
 
 def vault_api_key():
     """Vault-first credential fetch. Each node has its own vault.env with the rotated
-    AppRole secret_id, so a dispatched job can authenticate without .4 sending secrets
+    AppRole secret_id, so a dispatched job can authenticate without the dispatcher sending secrets
     over the wire. Without this the target had no model credential at all and every
     cross-machine job exited 75 (TEMPFAIL) - found on the first real dispatch."""
     cfg = load_env(VAULT_ENV)
     addr = (cfg.get("VAULT_ADDR") or "").rstrip("/")
     rid, sid = cfg.get("VAULT_ROLE_ID"), cfg.get("VAULT_SECRET_ID")
-    if not (addr and rid and sid):
-        return None, "vault config incomplete"
+    # A CIDR-bound AppRole carries no secret_id (Ticket 305). Requiring one made this node refuse
+    # to attempt a login at all and report "vault config incomplete" forever.
+    if not (addr and rid):
+        return None, "vault config incomplete (need VAULT_ADDR + VAULT_ROLE_ID)"
     ctx = ssl.create_default_context(cafile=CA_FILE) if os.path.exists(CA_FILE) else None
     # BOUNDED RETRY on the AppRole login. Observed intermittently returning
     # 403 {"errors":["permission denied"]} for a role_id/secret_id pair that then
@@ -106,7 +113,10 @@ def vault_api_key():
     tok, last = None, ""
     for attempt in range(3):
         try:
-            body = json.dumps({"role_id": rid, "secret_id": sid}).encode()
+            _ident = {"role_id": rid}
+            if sid:
+                _ident["secret_id"] = sid
+            body = json.dumps(_ident).encode()
             rq = urllib.request.Request(addr + "/v1/auth/approle/login", data=body, method="POST")
             rq.add_header("Content-Type", "application/json")
             with urllib.request.urlopen(rq, timeout=20, context=ctx) as r:
@@ -128,7 +138,19 @@ def vault_api_key():
     if not tok:
         return None, last or "approle login failed"
     try:
-        rq2 = urllib.request.Request("%s/v1/%s" % (addr, VAULT_SECRET_PATH))
+        # Per-node credential path from an auditable file (path only, no secret). The constant is
+        # the fallback so the default dispatcher, which the constant belongs to, behaves exactly as before.
+        _p = ""
+        try:
+            with open(os.path.join(HOME, ".bare-ai", "config", "model-credential.path")) as _fh:
+                for _ln in _fh:
+                    _ln = _ln.strip()
+                    if _ln and not _ln.startswith("#"):
+                        _p = _ln
+                        break
+        except OSError:
+            pass
+        rq2 = urllib.request.Request("%s/v1/%s" % (addr, _p or VAULT_SECRET_PATH))
         rq2.add_header("X-Vault-Token", tok)
         with urllib.request.urlopen(rq2, timeout=20, context=ctx) as r:
             data = json.loads(r.read())
@@ -150,7 +172,7 @@ def vault_api_key():
         return None, "%s: %s" % (type(e).__name__, str(e)[:80])
 CLI = os.path.join(HOME, "bare-ai-cli", "bundle", "bare-ai.js")
 # Node path FIXED 2026-09-14: was hardcoded to /usr/local/bin/node, which does not exist
-# on .13/.18/.19 (they ship node at /usr/bin/node), so jobs dispatched to those nodes died
+# on nodes that ship node at /usr/bin/node), so jobs dispatched to those nodes died
 # with FileNotFoundError and looked like agent failures. Resolve from PATH first.
 def _resolve_node():
     import shutil as _sh
@@ -167,6 +189,91 @@ APPROVAL = os.environ.get("TASKBUS_EXEC_APPROVAL_MODE", "yolo")
 
 MAX_PASSES = int(os.environ.get("TASKBUS_MAX_PASSES", "3"))
 
+# ---- TICKET 306: secret redaction before anything reaches a log --------------------
+# WHY: machines_response in Baserow is readable by the stakeholder account, so any secret that
+# reaches stdout/stderr is durably exposed. This scrubber runs on ALL captured output.
+# Deliberately regex-free: plain scanning is auditable and cannot be broken by escape mangling.
+_SECRET_NAMES = ("SECRET", "TOKEN", "PASSWORD", "PASSWD", "API_KEY", "APIKEY",
+                 "PRIVATE_KEY", "ROLE_ID", "SECRET_ID", "CREDENTIAL", "WEBHOOK")
+
+
+def _marker(name):
+    return "<REDACTED:" + name + ">"
+
+
+def _looks_secret_value(v):
+    """Value-shape detection, for secrets that carry no helpful label."""
+    s = v.strip().strip('"').strip("'")
+    if len(s) < 16:
+        return None
+    low = s.lower()
+    if low.startswith("sk-"):
+        return "sk-like-token"
+    if low.startswith("hvs.") or low.startswith("hv."):
+        return "vault-token"
+    if low.startswith("ghp_") or low.startswith("gho_") or low.startswith("ghs_"):
+        return "github-token"
+    if low.startswith("xox"):
+        return "slack-token"
+    if s[:4] == "AKIA" and len(s) >= 20:
+        return "aws-key-id"
+    if s.count(".") == 2 and len(s) >= 40:
+        seg = s.split(".")
+        if all(len(x) >= 8 for x in seg):
+            return "jwt-like"
+    return None
+
+
+def _redact_line(line):
+    out = line
+    for sep in ("=", ":"):
+        if sep not in out:
+            continue
+        idx = out.find(sep)
+        while idx != -1:
+            left = out[:idx].strip().split()[-1].strip('"').strip("'").upper() if out[:idx].strip() else ""
+            rest = out[idx + 1:]
+            if any(tok in left for tok in _SECRET_NAMES) and rest.strip():
+                stop = len(rest)
+                for ch in (",", ";"):
+                    j = rest.find(ch)
+                    if j != -1 and j < stop:
+                        stop = j
+                out = out[:idx + 1] + " " + _marker(left[-24:] or "SECRET") + rest[stop:]
+                break
+            idx = out.find(sep, idx + 1)
+    parts = out.split(" ")
+    for i, tok in enumerate(parts):
+        kind = _looks_secret_value(tok)
+        if kind:
+            parts[i] = _marker(kind)
+    return " ".join(parts)
+
+
+def _redact_secrets(text):
+    """Fail CLOSED: if redaction raises, withhold the output rather than emit it raw."""
+    if not text:
+        return text
+    try:
+        lines = text.split(chr(10))
+        out = []
+        i = 0
+        while i < len(lines):
+            ln = lines[i]
+            if "-----BEGIN" in ln and "PRIVATE KEY-----" in ln:
+                out.append(_marker("pem-private-key"))
+                j = i + 1
+                while j < len(lines) and "-----END" not in lines[j]:
+                    j += 1
+                i = j + 1
+                continue
+            out.append(_redact_line(ln))
+            i += 1
+        return chr(10).join(out)
+    except Exception as exc:
+        return "<output withheld: redaction error " + type(exc).__name__ + ">"
+
+
 # ---- criterion execution -------------------------------------------------
 # The POLLER parses success_criterion (single source of truth for the grammar) and ships the
 # parsed checks here as JSON. This runner only EXECUTES them, so the grammar can never diverge.
@@ -179,11 +286,30 @@ def _run_check(kind, args):
         if kind == "http_status":
             url, want = args[0], int(args[1])
             req = urllib.request.Request(url, method="GET")
+            # TICKET 307: a User-Agent is mandatory. Cloudflare answers the default
+            # python-urllib UA with 403 "error code: 1010", indistinguishable from a real API
+            # 403, which made every http_status check fail regardless of the endpoint.
+            req.add_header("User-Agent", CHECK_UA)
+            req.add_header("Accept", "application/json, text/plain;q=0.9, */*;q=0.8")
+            body, hdrs = b"", {}
             try:
                 with urllib.request.urlopen(req, timeout=20) as r:
                     got = r.status
+                    hdrs = dict(getattr(r, "headers", {}) or {})
+                    body = r.read(512)
             except urllib.error.HTTPError as e:
                 got = e.code
+                hdrs = dict(getattr(e, "headers", {}) or {})
+                try:
+                    body = e.read(512)
+                except Exception:
+                    body = b""
+            low = body.decode("utf-8", "replace").lower()
+            edge_block = got == 403 and ("error code: 1010" in low
+                                         or str(hdrs.get("cf-mitigated", "")).lower() == "challenge")
+            if edge_block:
+                return None, ("%s -> 403 Cloudflare 1010 (edge bot block, NOT the API); "
+                              "criterion UNVERIFIABLE - fix the checker UA" % url)
             return (got == want), "%s -> %s (want %s)" % (url, got, want)
         if kind == "file_exists":
             p = args[0]
@@ -200,7 +326,7 @@ def _run_check(kind, args):
             return (got == want), "%s %s=%s (want %s)" % (p, kind, got[:12], want[:12])
         if kind == "file_excludes":
             # NEGATIVE assertion: PASS only if the file exists and the literal text is ABSENT.
-            # Missing file is a FAIL - absence cannot be verified in a file that does not exist.
+            # Missing file is a FAIL - absence cannot be verified in a file that is not there.
             p, lit = args[0], str(args[1])
             if not os.path.exists(p):
                 return False, "%s MISSING - cannot verify absence in a file that is not there" % p
@@ -271,26 +397,53 @@ def main():
             print("target-job: criterion JSON unparseable (%s) - deferring to poller" % e)
 
     env = dict(os.environ)
-    vkey, vsrc = vault_api_key()
-    if vkey:
-        env["BARE_AI_API_KEY"] = vkey
-        print("target-job: credential source = Vault (%s)" % vsrc)
-    else:
-        print("target-job: credential source = local env (%s)" % vsrc)
-    if not (env.get("BARE_AI_API_KEY") or env.get("BARE_AI_ENDPOINT")):
-        print("target-job: TEMPFAIL - no model credential available on this node; "
-              "task NOT attempted, no attempt consumed", file=sys.stderr)
+
+    # 1. NODE PROFILE FIRST (Liege 2026-11-03). A dispatched pass must be the same environment as an
+    #    interactive session on this node: profile.env decides the route, model-credentials.env holds the
+    #    key that matches it. Overriding either with the catalogue route or a Vault key produced a
+    #    provider URL signed with a platform key, which is a 401 on every node, permanently.
+    profile = load_env(os.path.join(HOME, ".bare-ai", "profile.env"))
+    creds = load_env(os.path.join(HOME, ".bare-ai", "model-credentials.env"))
+    for _src in (profile, creds):
+        for _k, _v in _src.items():
+            if _v:
+                env[_k] = _v
+    if profile.get("BARE_AI_ENDPOINT"):
+        print("target-job: route source = node profile (%s) model=%s"
+              % (profile.get("BARE_AI_PROFILE") or "?", env.get("BARE_AI_MODEL")))
+    if env.get("BARE_AI_API_KEY"):
+        print("target-job: credential source = node profile/model-credentials.env")
+
+    # 2. Vault key is a FILL-IN only; it never overrides a profile credential.
+    if not env.get("BARE_AI_API_KEY"):
+        vkey, vsrc = vault_api_key()
+        if vkey:
+            env["BARE_AI_API_KEY"] = vkey
+            print("target-job: credential source = Vault (%s)" % vsrc)
+        else:
+            print("target-job: no profile credential; vault says (%s)" % vsrc)
+
+    # 3. fail closed, unchanged in spirit: no credential from either source means no attempt.
+    if not env.get("BARE_AI_API_KEY"):
+        print("target-job: TEMPFAIL - no model credential available on this node "
+              "(profile and Vault both empty); task NOT attempted, no attempt consumed", file=sys.stderr)
         return 75
 
-    sc = shortcut_from_prompt(task) or DEFAULT_SHORTCUT
-    cep, cmodel, cnote = central_route(sc)
-    if cep and cmodel:
-        env["BARE_AI_ENDPOINT"], env["BARE_AI_MODEL"] = cep, cmodel
-        print("target-job: model route = %s -> model=%s endpoint=%s" % (cnote, cmodel, cep))
+    # 4. catalogue route ONLY when the profile did not define one.
+    if not env.get("BARE_AI_ENDPOINT"):
+        sc = shortcut_from_prompt(task) or DEFAULT_SHORTCUT
+        cep, cmodel, cnote = central_route(sc)
+        if cep and cmodel:
+            env["BARE_AI_ENDPOINT"], env["BARE_AI_MODEL"] = cep, cmodel
+            print("target-job: route source = central catalogue %s -> model=%s endpoint=%s"
+                  % (cnote, cmodel, cep))
+        else:
+            env.setdefault("BARE_AI_ENDPOINT", FALLBACK_ENDPOINT)
+            env.setdefault("BARE_AI_MODEL", FALLBACK_MODEL)
+            print("target-job: central list UNAVAILABLE (%s) - HARDCODED fallback %s"
+                  % (cnote, FALLBACK_MODEL))
     else:
-        env.setdefault("BARE_AI_ENDPOINT", FALLBACK_ENDPOINT)
         env.setdefault("BARE_AI_MODEL", FALLBACK_MODEL)
-        print("target-job: central list UNAVAILABLE (%s) - HARDCODED fallback %s" % (cnote, FALLBACK_MODEL))
     env.pop("NODE_TLS_REJECT_UNAUTHORIZED", None)
     ca = os.path.join(HOME, ".bare-ai", "ca", "vault-ca.crt")
     if os.path.exists(ca):
@@ -313,6 +466,21 @@ def main():
         cmd = [NODE, CLI, "--yolo", "--tools"]
         if attempt > 1:
             cmd += ["--resume", "latest"]
+        # 2026-11-03: a job could only read $HOME/.bare-ai/work, so tickets about a repo tree could
+        # never be worked. Per-node list, one absolute path per line; absent file = unchanged behaviour.
+        _inc_f = os.path.join(HOME, ".bare-ai", "config", "job-include-dirs")
+        _inc = []
+        try:
+            with open(_inc_f) as _fh:
+                for _ln in _fh:
+                    _ln = _ln.strip()
+                    if _ln and not _ln.startswith("#"):
+                        _inc.append(_ln)
+        except OSError:
+            pass
+        if _inc:
+            cmd += ["--include-directories"] + _inc
+            print("target-job: include directories = %s" % ", ".join(_inc))
         cmd += ["-p", "", "--prompt-file", pf_use, "-o", "text"]
         print("target-job: ===== pass %d/%d ===== %s" % (attempt, MAX_PASSES,
               "resume latest" if attempt > 1 else "fresh session"))
@@ -324,6 +492,7 @@ def main():
             print("target-job: TIMEOUT after %ds on pass %d - task not completed" % (TIMEOUT, attempt))
             return 1
         out = p.stdout.decode("utf-8", "replace")
+        out = _redact_secrets(out)          # TICKET 306: scrub before it can reach a log
         print(out[-4000:] if len(out) > 4000 else out)
         print("target-job: pass %d CLI exit_code=%d" % (attempt, p.returncode))
         if p.returncode != 0:
