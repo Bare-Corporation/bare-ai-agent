@@ -1701,6 +1701,23 @@ def exit_zero_ban_verdict(row):
     return True, "exit_zero on a row that names no deliverable"
 
 
+def is_claimable(row):
+    """TICKET 2026-11-03 (Liege): New/Retry/Reopened, OR InProgress with a DEAD lease.
+
+    Why this exists: ACTABLE_STATUSES already contained InProgress, so the cycle scanned crashed rows,
+    but CLAIMABLE_STATUSES did not, so intake never claimed them. An executor that died mid-task left
+    its row InProgress with an expired lease and nothing ever picked it up again.
+    The gateway still enforces the lease, so a live claim cannot be stolen: it answers 409 and the row
+    is left exactly as it was.
+    """
+    s = st(row)
+    if s in CLAIMABLE_STATUSES:
+        return True
+    if s == "InProgress":
+        return not lease_live(row)
+    return False
+
+
 def lease_live(row, now=None):
     """TICKET 332. True while the gateway's lease on this row is still live.
 
@@ -2396,7 +2413,7 @@ class Poller:
         for row in rows:
             if started >= budget:
                 break
-            if st(row) not in CLAIMABLE_STATUSES:
+            if not is_claimable(row):
                 continue
             rid = row["id"]
             if ONLY_ROWS and rid not in ONLY_ROWS:
@@ -2434,7 +2451,7 @@ class Poller:
 
             # guardrail 6: never act on an unread row - full read, then re-verify.
             fresh = self.bus.get_row(rid)
-            if st(fresh) not in CLAIMABLE_STATUSES:
+            if not is_claimable(fresh):
                 log("row %s changed to %s between scan and claim - skipping" % (rid, st(fresh)))
                 self.record("claim-race", rid, "status was %s at re-read" % st(fresh))
                 continue
