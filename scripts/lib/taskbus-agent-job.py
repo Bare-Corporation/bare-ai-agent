@@ -76,6 +76,41 @@ def shortcut_from_prompt(text):
     return m.group(1) if m else None
 
 
+def taskbus_ticket_meta(text):
+    """Return (row_id, title) from the task-bus prompt envelope, or (None, None).
+
+    WHY: runner logs and job JSONs carried NO row id, so after a run nobody could say which Baserow
+    row a job belonged to (measured on a worker node, 2026-11-04: neither td-taskbus-*.log nor *.json named a
+    row). The envelope the poller already writes contains it, so re-read it here rather than inventing
+    another channel:
+        TASK-BUS JOB - row 276 (dispatched by the task-bus poller)
+        SHORT DESCRIPTION: <title, possibly WRAPPED over several lines>
+    Continuation lines up to the first blank line are joined with spaces, because long titles wrap
+    (row 276 wraps mid-sentence) and first-line-only would silently truncate.
+    Never raises: a malformed envelope must not kill a job.
+    """
+    import re as _re
+    row_id, title = None, None
+    try:
+        m = _re.search(r"^TASK-BUS JOB\s*-\s*row\s*([0-9]+)", text or "", _re.M)
+        if m:
+            row_id = m.group(1)
+        m2 = _re.search(r"^SHORT DESCRIPTION:\s*(.*)$", text or "", _re.M)
+        if m2:
+            parts = [m2.group(1).strip()]
+            for line in (text or "")[m2.end():].split(chr(10))[1:]:
+                s = line.strip()
+                if not s:
+                    break
+                parts.append(s)
+            title = " ".join(p for p in parts if p).strip()
+        if title:
+            title = title[:200]
+    except Exception:
+        return row_id, title
+    return row_id, title
+
+
 def load_env(path):
     env = {}
     try:
@@ -384,6 +419,9 @@ def main():
 
     # The task envelope only. The CLI loads the constitution through its own system channel;
     # prepending role.md + constitution here was pure dilution (~235 KB per job).
+    taskbus_row_id, taskbus_title = taskbus_ticket_meta(task)
+    print("target-job: baserow_row=%s title=%s" % (taskbus_row_id, taskbus_title))
+
     print("target-job: task=%d bytes, cwd=%s, mode=%s, max_passes=%d (no preamble injected)"
           % (len(task), cwd, APPROVAL, MAX_PASSES))
 

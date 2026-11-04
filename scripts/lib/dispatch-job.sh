@@ -36,6 +36,64 @@ JOB_DIR="${HOME}/.bare-ai/jobs"
 LOG_PATH="${JOB_DIR}/${UUID}.log"
 STATE_PATH="${JOB_DIR}/${UUID}.json"
 
+# --- Ticket identity (added 2026-11-04) -------------------------------------
+# WHY: runner logs and job JSONs carried no row id, so a finished job could not be tied to the Baserow
+# row it was dispatched for. The envelope the poller ALREADY writes into <uuid>.prompt contains it:
+#     TASK-BUS JOB - row 276 (dispatched by the task-bus poller)
+#     SHORT DESCRIPTION: <title, possibly WRAPPED over several lines>
+# Titles wrap (row 276 wraps mid-sentence), so continuation lines up to the first blank line are joined;
+# a first-line-only parse would silently store a truncated title.
+# Extracted once here, then re-applied by add_meta after EACH state write, because this script rewrites
+# the JSON wholesale at the end and would otherwise drop the keys.
+PROMPT_PATH="${JOB_DIR}/${UUID}.prompt"
+TB_ROW=""
+TB_TITLE=""
+read_ticket_meta() {
+  [ -f "${PROMPT_PATH}" ] || return 0
+  local _meta
+  _meta="$(python3 - "${PROMPT_PATH}" <<'PYEOF'
+import re, sys
+try:
+    text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError:
+    sys.exit(0)
+row = ""
+title = ""
+m = re.search(r"^TASK-BUS JOB\s*-\s*row\s*([0-9]+)", text, re.M)
+if m:
+    row = m.group(1)
+m2 = re.search(r"^SHORT DESCRIPTION:\s*(.*)$", text, re.M)
+if m2:
+    parts = [m2.group(1).strip()]
+    for line in text[m2.end():].split(chr(10))[1:]:
+        s = line.strip()
+        if not s:
+            break
+        parts.append(s)
+    title = " ".join(p for p in parts if p).strip()
+print(row)
+print(title)
+PYEOF
+)"
+  { IFS= read -r TB_ROW; IFS= read -r TB_TITLE; } <<< "${_meta}"
+}
+add_meta() {
+  python3 - "${STATE_PATH}" "${TB_ROW}" "${TB_TITLE}" <<'PYEOF'
+import json, os, sys
+p, row, title = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.load(open(p))
+except Exception:
+    sys.exit(0)
+d["baserow_row_id"] = int(row) if row.isdigit() else None
+d["ticket_title"] = title or None
+tmp = p + ".meta.tmp"
+open(tmp, "w").write(json.dumps(d, indent=2, sort_keys=True))
+os.replace(tmp, p)
+PYEOF
+}
+read_ticket_meta
+
 # Secret scrub regex (POSIX ERE for sed -E). Applied to the log stream.
 # Ordered scrub expressions, applied with GNU sed -E. No single quotes appear
 # inside any expression, so shell quoting stays simple.
@@ -91,6 +149,7 @@ cat > "${STATE_TMP}" <<EOF
 }
 EOF
 mv -f "${STATE_TMP}" "${STATE_PATH}"
+add_meta
 if [ -n "${CRIT}" ]; then
   python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));d["success_criterion"]=sys.argv[2];open(sys.argv[1],"w").write(json.dumps(d,indent=2,sort_keys=True))' "${STATE_PATH}" "${CRIT}" || true
 fi
@@ -137,6 +196,7 @@ cat > "${STATE_TMP}" <<EOF
 }
 EOF
 mv -f "${STATE_TMP}" "${STATE_PATH}"
+add_meta
 if [ -n "${CRIT}" ]; then
   python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));d["success_criterion"]=sys.argv[2];open(sys.argv[1],"w").write(json.dumps(d,indent=2,sort_keys=True))' "${STATE_PATH}" "${CRIT}" || true
 fi
