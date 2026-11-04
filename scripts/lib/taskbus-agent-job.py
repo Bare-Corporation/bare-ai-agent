@@ -14,6 +14,10 @@ import urllib.request, urllib.error
 
 HOME = os.path.expanduser("~")
 VAULT_ENV = os.path.join(HOME, ".bare-ai", "config", "vault.env")
+# LEGACY FALLBACK, kept only so a node that predates model-credential.path keeps working.
+# The 1-to-1 Vault namespace makes a node credential path per-machine, so every node is
+# expected to declare its own in ~/.bare-ai/config/model-credential.path; using this value
+# now warns on stderr. Do not add new dependencies on it.
 VAULT_SECRET_PATH = "secret/data/bare-ai-brain/config"
 VAULT_KEY_FIELD = "api_key"
 CA_FILE = os.path.join(HOME, ".bare-ai", "ca", "vault-ca.crt")
@@ -185,6 +189,11 @@ def vault_api_key():
                         break
         except OSError:
             pass
+        if not _p:
+            sys.stderr.write(
+                "target-job: WARNING no model-credential.path on this node; falling back to "
+                "the legacy shared Vault path. Set ~/.bare-ai/config/model-credential.path "
+                "to this machine own secret path." + chr(10))
         rq2 = urllib.request.Request("%s/v1/%s" % (addr, _p or VAULT_SECRET_PATH))
         rq2.add_header("X-Vault-Token", tok)
         with urllib.request.urlopen(rq2, timeout=20, context=ctx) as r:

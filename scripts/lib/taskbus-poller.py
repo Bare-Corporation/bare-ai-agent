@@ -452,8 +452,12 @@ def load_env():
 # failed Vault lookup means the credential is UNTRUSTED, not optional - so this fails closed and
 # lets the cycle abort loudly rather than silently reverting to a shared identity.
 VAULT_ENVF = os.path.join(HOME, ".bare-ai", "config", "vault.env")
-POLLER_SECRET_PATH = os.environ.get(
-    "BASEROW_SECRET_PATH", "secret/data/baserow/machines/bare-ai-poller-04")
+# 2026-11-04: NO DEFAULT. The 1-to-1 Vault namespace keeps each machine identity at
+# secret/data/machines/<machine-id>, so this path necessarily contains the node id and cannot
+# be defaulted in shared source: the old default was one node identity, was silently wrong on
+# every other node, and pointed at a path the new policy denies. The host unit supplies
+# BASEROW_SECRET_PATH. Without it the cycle aborts loudly rather than reading a wrong path.
+POLLER_SECRET_PATH = os.environ.get("BASEROW_SECRET_PATH", "").strip()
 
 
 def _vault_exports():
@@ -487,6 +491,11 @@ def poller_baserow_jwt(base):
     with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
         vt = json.loads(resp.read())["auth"]["client_token"]
 
+    if not POLLER_SECRET_PATH:
+        raise RuntimeError(
+            "BASEROW_SECRET_PATH is not set. It is per-node configuration (the host unit "
+            "supplies it) and there is no built-in default because the 1-to-1 path contains "
+            "the machine id.")
     req = urllib.request.Request(addr + "/v1/" + POLLER_SECRET_PATH)
     req.add_header("X-Vault-Token", vt)
     with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
