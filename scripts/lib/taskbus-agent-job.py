@@ -34,6 +34,21 @@ FALLBACK_MODEL = "deepseek-v4-flash"
 CHECK_UA = "bare-ai-taskbus-verifier/1.0"
 
 
+# Shell constraints the harness enforces. Stated here because an executor that discovers the rule by
+# hitting it burns passes: on 2026-11-05 a job spent all three passes repeating an inline loop that
+# captured command output, and every attempt came back blocked.
+SHELL_RULES = chr(10).join([
+    "SHELL RULES (enforced by the harness - plan around them):",
+    "- Command substitution is BLOCKED in every command argument: no dollar-paren, no backticks.",
+    "- Need a value from one command in another? Do it inside ONE python3 program instead.",
+    "- Multi-step shell work goes in a script file you then execute; never an inline loop that",
+    "  captures command output into an argument list.",
+    "- If a tool returns Blocked: command substitution detected, that is a PIVOT signal: change",
+    "  the approach and retry once. Do not repeat the same shape of command.",
+    "- If the task truly needs substitution, say so explicitly instead of exiting silently.",
+]) + chr(10) + chr(10)
+
+
 def central_route(shortcut):
     """Resolve (endpoint, model, note) from the CENTRAL model list.
 
@@ -500,7 +515,7 @@ def main():
 
     task_path = os.path.join(cwd, ".taskbus-task.prompt")
     with open(task_path, "w", encoding="utf-8") as fh:
-        fh.write(task)
+        fh.write(SHELL_RULES + task)
 
     feedback = ""
     last_report = []
