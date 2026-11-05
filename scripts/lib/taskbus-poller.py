@@ -1297,9 +1297,27 @@ def _dispatch_lookups():
 _BY_IP, _BY_NAME = _dispatch_lookups()
 
 
+# Order matters: the renamed field wins, then the legacy names, then a raw field-id key.
+REP_FIELD_NAMES = (
+    "assigned_to_stakeholder_representative",
+    "assigned_to_machine",
+    "field_6378",
+    "stakeholder_representatives_master",
+)
 def rep_ids(row):
-    """Int ids from stakeholder_representatives_master, defensively parsed."""
-    v = row.get("stakeholder_representatives_master")
+    """Int ids of the owner representative, defensively parsed.
+
+    THE FIELD WAS RENAMED ON 2026-11-05: assigned_to_machine was deleted and the routing
+    field is assigned_to_stakeholder_representative - still id 6378. Reading a name that no
+    longer exists returns None SILENTLY, which is how the entire fleet stopped claiming while
+    every process still looked healthy. New name first, legacy names only as fallbacks, and
+    field_6378 last in case a caller hands us raw-id keys.
+    """
+    v = None
+    for _name in REP_FIELD_NAMES:
+        v = row.get(_name)
+        if v:
+            break
     out = []
     if isinstance(v, list):
         for it in v:
@@ -1615,6 +1633,37 @@ def run_check(node, check):
             path, (got or "?")[:12], before[:12],
             "CHANGED" if changed else "UNCHANGED")
 
+    if kind == "file_excludes":
+        # NEGATIVE assertion (ticket 246; evaluator added for row 512). parse_check accepted this
+        # directive from the day it was written, but run_check had no branch for it, so every row
+        # that used it died at completion with an unhandled-check-kind error - a gate that could
+        # never pass, reported as an internal fault rather than as a failed assertion.
+        # Semantics: an absent file FAILS (you cannot prove text is gone if there is no file),
+        # the literal present FAILS, the literal absent PASSES.
+        path, literal = args
+        if local:
+            if not os.path.exists(path):
+                return False, "file_excludes %s -> NOFILE (file absent)" % path
+            try:
+                with open(path, "r", errors="replace") as fh:
+                    blob = fh.read()
+            except OSError as exc:
+                return None, "file_excludes %s could not be read: %s" % (path, exc)
+            found = literal in blob
+        else:
+            cmd = ("if [ ! -e %s ]; then echo NOFILE; elif grep -F -q -- %s %s; "
+                   "then echo PRESENT; else echo ABSENT; fi"
+                   % (shlex.quote(path), shlex.quote(literal), shlex.quote(path)))
+            ok, out = remote(cmd)
+            if not ok:
+                return None, "file_excludes %s on %s UNREACHABLE: %s" % (
+                    path, node, (out or "")[:120])
+            if "NOFILE" in (out or ""):
+                return False, "file_excludes %s on %s -> NOFILE (file absent)" % (path, node)
+            found = "PRESENT" in (out or "")
+        return (not found), "file_excludes %s =%s %r -> %s" % (
+            path, "FOUND" if found else "ABSENT", literal[:40],
+            "FAIL" if found else "PASS")
     if kind == "file_exists":
         path = args[0]
         if local:
