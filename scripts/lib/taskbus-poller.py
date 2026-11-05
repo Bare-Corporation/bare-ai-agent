@@ -484,8 +484,12 @@ def poller_baserow_jwt(base):
     ctx.verify_mode = ssl.CERT_NONE
     addr = env["VAULT_ADDR"].rstrip("/")
 
-    body = json.dumps({"role_id": env["VAULT_ROLE_ID"],
-                       "secret_id": env["VAULT_SECRET_ID"]}).encode()
+    # A CIDR-bound AppRole carries no secret_id. Present it only when it exists, so a
+    # role_id-only node logs in instead of raising KeyError on the missing field.
+    _ident = {"role_id": env["VAULT_ROLE_ID"]}
+    if env.get("VAULT_SECRET_ID"):
+        _ident["secret_id"] = env["VAULT_SECRET_ID"]
+    body = json.dumps(_ident).encode()
     req = urllib.request.Request(addr + "/v1/auth/approle/login", data=body)
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
@@ -588,8 +592,12 @@ def agent_api_key(force=False):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         addr = env["VAULT_ADDR"].rstrip("/")
-        body = json.dumps({"role_id": env["VAULT_ROLE_ID"],
-                           "secret_id": env["VAULT_SECRET_ID"]}).encode()
+        # A CIDR-bound AppRole carries no secret_id. Present it only when it exists, so a
+        # role_id-only node logs in instead of raising KeyError on the missing field.
+        _ident = {"role_id": env["VAULT_ROLE_ID"]}
+        if env.get("VAULT_SECRET_ID"):
+            _ident["secret_id"] = env["VAULT_SECRET_ID"]
+        body = json.dumps(_ident).encode()
         req = urllib.request.Request(addr + "/v1/auth/approle/login", data=body)
         req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
