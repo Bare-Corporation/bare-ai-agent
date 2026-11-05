@@ -37,6 +37,7 @@ import shlex
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import uuid as uuidlib
 import urllib.error
@@ -629,7 +630,224 @@ def agent_key_status():
         return False, str(exc)
 
 
-def _gw_request(path, method="GET", body=None, nonce=None, timeout=30):
+# ---------------------------------------------------------------------------
+# PK-16/304-C (taskbus row 477): CLIENT-SIDE SILENT REFRESH LOOP
+#
+# Why the client and not the API: the API already knows how to mint a short-lived child
+# of the caller's own key (POST /v1/keys/exchange, row 475). What it cannot decide is
+# when its CLIENT should stop using a credential. That scheduling belongs here, in the
+# runtime that holds the parent key and makes the calls.
+#
+# Contract:
+#   * OPTIONAL BY CONFIGURATION. With BARE_AI_CLIENT_REFRESH unset, this module is inert:
+#     the runtime behaves exactly as it did before, one Vault-read key per call.
+#   * The schedule comes from the SERVER's expires_at, never from a local guess about
+#     how long a token lives. Trigger = `fraction` (default 0.8) of the reported
+#     lifetime, floored so it can never land later than `skew` seconds before expiry -
+#     a slow local clock cannot push the refresh past the deadline.
+#   * The parent key never leaves memory: not logged, not written to disk, not put in
+#     any exception message, and not placed in prompt context (the executor is handed
+#     the derived key at most).
+#   * FAIL CLOSED. A failed refresh marks the keyring dead; every later call raises
+#     EphemeralCredentialError instead of silently falling back to the parent key or
+#     continuing on an expired child.
+# ---------------------------------------------------------------------------
+CLIENT_REFRESH_ENABLED = os.environ.get("BARE_AI_CLIENT_REFRESH", "").strip().lower() in (
+    "1", "true", "yes", "on")
+CLIENT_REFRESH_TTL_MINUTES = int(os.environ.get("BARE_AI_EPHEMERAL_TTL_MINUTES", "15") or 15)
+CLIENT_REFRESH_FRACTION = float(os.environ.get("BARE_AI_REFRESH_FRACTION", "0.8") or 0.8)
+CLIENT_REFRESH_SKEW_SECONDS = float(os.environ.get("BARE_AI_REFRESH_SKEW_SECONDS", "60") or 60)
+EXCHANGE_PATH = "/v1/keys/exchange"
+
+
+class EphemeralCredentialError(RuntimeError):
+    """The derived credential is not usable. Never carries key material."""
+
+
+def _parse_expiry(value):
+    """Server timestamp -> epoch seconds, or None when it cannot be parsed."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+class SilentRefresher:
+    """Hold a short-lived derived credential and keep it fresh, behind the agent.
+
+    One instance per process. The caller never sees the parent key and never schedules
+    anything: it asks for a credential at call time and gets whichever child is current.
+    """
+
+    def __init__(self, ttl_minutes=None, fraction=None, skew_seconds=None):
+        self.ttl_minutes = CLIENT_REFRESH_TTL_MINUTES if ttl_minutes is None else ttl_minutes
+        self.fraction = CLIENT_REFRESH_FRACTION if fraction is None else fraction
+        self.skew = CLIENT_REFRESH_SKEW_SECONDS if skew_seconds is None else skew_seconds
+        self._key = None
+        self._key_id = None
+        self._expires_at = None
+        self._next_at = None
+        self._failed = None
+        self._stop = threading.Event()
+        self._thread = None
+        self.stats = {"refreshes": 0, "failures": 0, "ttl_seconds": None,
+                      "last_refresh_at": None, "last_error": None}
+
+    # -- exchange ----------------------------------------------------------
+    def _exchange(self):
+        """One exchange call. Raises EphemeralCredentialError on any refusal.
+
+        Deliberately NOT routed through _gw_request: that sends the key as
+        'Authorization: Bearer', while /v1/keys/exchange authenticates on 'X-API-Key'.
+        Using the wrong header here fails as "missing API key" and sends the next
+        person to debug the gateway instead of the header.
+        """
+        if not GATEWAY_BASE:
+            raise EphemeralCredentialError("TASKBUS_GATEWAY_BASE is not set")
+        parent = agent_api_key()
+        payload = json.dumps({"ttl_minutes": int(self.ttl_minutes)}).encode()
+        req = urllib.request.Request(GATEWAY_BASE + EXCHANGE_PATH, data=payload, method="POST")
+        req.add_header("X-API-Key", parent)
+        req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", GATEWAY_UA)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:200]
+            except Exception:
+                pass
+            raise EphemeralCredentialError("exchange refused: HTTP %s %s" % (exc.code, detail))
+        except Exception as exc:
+            raise EphemeralCredentialError(
+                "exchange failed: %s: %s" % (type(exc).__name__, str(exc)[:160]))
+
+    def _schedule(self, issued_at):
+        """Next refresh time, derived from the SERVER-reported expiry."""
+        ttl = None
+        if self._expires_at:
+            ttl = self._expires_at - issued_at
+        if not ttl or ttl <= 0:
+            ttl = float(self.ttl_minutes) * 60.0
+        self.stats["ttl_seconds"] = ttl
+        target = issued_at + (ttl * self.fraction)
+        latest = (self._expires_at or (issued_at + ttl)) - self.skew
+        self._next_at = min(target, latest)
+        return self._next_at
+
+    def refresh(self):
+        """Exchange now and reschedule. Raises EphemeralCredentialError on failure."""
+        issued = time.time()
+        body = self._exchange()
+        key = (body.get("api_key") or "").strip()
+        if not key:
+            raise EphemeralCredentialError("exchange returned no api_key")
+        self._key = key
+        self._key_id = body.get("key_id")
+        self._expires_at = _parse_expiry(body.get("expires_at"))
+        self._failed = None
+        self.stats["refreshes"] += 1
+        self.stats["last_refresh_at"] = datetime.now(timezone.utc).isoformat()
+        self._schedule(issued)
+        log("credential: derived key %s in use (server ttl=%ss, next refresh in %.0fs)"
+            % (self._key_id, int(self.stats["ttl_seconds"]),
+               max(0.0, (self._next_at or 0) - time.time())))
+        return key
+
+    # -- thread ------------------------------------------------------------
+    def _loop(self):
+        while not self._stop.is_set():
+            remaining = (self._next_at or 0) - time.time()
+            if remaining > 0:
+                self._stop.wait(min(remaining, 5.0))
+                continue
+            try:
+                self.refresh()
+            except EphemeralCredentialError as exc:
+                self._failed = str(exc)[:300]
+                self.stats["failures"] += 1
+                self.stats["last_error"] = self._failed
+                log("credential: REFRESH FAILED - failing closed: %s" % self._failed, "ERROR")
+                break
+
+    def start(self):
+        self.refresh()  # synchronous: a bad credential is a startup fault, not a late one
+        self._thread = threading.Thread(target=self._loop, name="silent-refresh", daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+
+    # -- access ------------------------------------------------------------
+    def credential(self):
+        if self._failed:
+            raise EphemeralCredentialError(
+                "derived credential is no longer trusted (last refresh failed: %s)"
+                % self._failed)
+        if not self._key:
+            raise EphemeralCredentialError("derived credential has not been established")
+        if self._expires_at and time.time() >= self._expires_at:
+            raise EphemeralCredentialError("derived credential expired and was not refreshed")
+        return self._key
+
+    def status(self):
+        if self._key and not self._failed:
+            left = max(0, int((self._expires_at or 0) - time.time()))
+            return True, ("ephemeral key_id=%s ttl=%ss remaining=%ss refreshes=%d failures=%d"
+                          % (self._key_id, int(self.stats["ttl_seconds"] or 0), left,
+                             self.stats["refreshes"], self.stats["failures"]))
+        return False, "ephemeral credential unavailable: %s" % (self._failed or "not established")
+
+
+_SILENT = {"refresher": None}
+_SILENT_LOCK = threading.Lock()
+
+
+def _silent_refresher():
+    r = _SILENT["refresher"]
+    if r is None:
+        r = SilentRefresher()
+        _SILENT["refresher"] = r
+    return r
+
+
+def client_credential():
+    """Credential for gateway calls: the derived child when refresh is enabled.
+
+    Starts the refresher on first use. The cycle preflight normally does that, but the
+    one-shot CLI paths (--gateway-claim, --complete-check) call the gateway directly and
+    must not be able to reach a keyring that exists but was never started - that state
+    fails as "not established" on every call, which reads like an auth fault.
+    """
+    if not CLIENT_REFRESH_ENABLED:
+        return agent_api_key()
+    r = _silent_refresher()
+    with _SILENT_LOCK:
+        if r._key is None and not r._failed:
+            r.start()
+    return r.credential()
+
+
+def client_credential_status():
+    """(ok, detail) for status logging. Never returns or logs key material."""
+    if not CLIENT_REFRESH_ENABLED:
+        return True, "silent refresh disabled - using this node's agent key directly"
+    try:
+        r = _silent_refresher()
+        if r._key is None:
+            r.start()
+        return r.status()
+    except EphemeralCredentialError as exc:
+        return False, str(exc)
+
+
+def _gw_request(path, method="GET", body=None, nonce=None, timeout=30,
+                use_parent=False):
     """One gateway call. Raises GatewayError carrying status + detail, never the key."""
     if not GATEWAY_BASE:
         raise GatewayError("TASKBUS_GATEWAY_BASE is not set. It is per-node "
@@ -638,7 +856,11 @@ def _gw_request(path, method="GET", body=None, nonce=None, timeout=30):
     url = GATEWAY_BASE + path
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", "Bearer " + agent_api_key())
+    # PK-16/304-C: every normal call rides the derived credential. The fail-closed
+    # release path asks for the parent explicitly, because the reason the release
+    # is happening is usually that the derived key is no longer trustworthy.
+    req.add_header("Authorization", "Bearer "
+                   + (agent_api_key() if use_parent else client_credential()))
     req.add_header("Accept", "application/json")
     req.add_header("User-Agent", GATEWAY_UA)
     if data is not None:
@@ -699,10 +921,10 @@ def gateway_claim(row_id):
     return _gw_request("/v1/taskbus/rows/%d/claim" % row_id, method="POST", body={})
 
 
-def gateway_patch(row_id, body, nonce=None):
+def gateway_patch(row_id, body, nonce=None, use_parent=False):
     """Nonce-guarded write-back. The caller must already hold the claim."""
     return _gw_request("/v1/taskbus/rows/%d" % row_id, method="PATCH",
-                       body=body, nonce=nonce)
+                       body=body, nonce=nonce, use_parent=use_parent)
 
 
 # ---------------------------------------------------------------- nonce store
@@ -1324,6 +1546,25 @@ def parse_check(spec):
             return None, "git_ls_remote needs REPO@BRANCH=SHA"
         return ("git_ls_remote", (repo, branch, want)), None
 
+    if kind == "file_changed":
+        # CHANGE assertion (row 496). file_exists certifies a path that may already have
+        # been there; file_sha256 pins an exact end state the author often cannot know in
+        # advance. This asserts only that the content is no longer what it was - the one
+        # thing an executor can prove about its own work without a verifier-owned artefact.
+        if "=" not in rest:
+            return None, "file_changed needs PATH=SHA256_BEFORE"
+        path, before = rest.rsplit("=", 1)
+        path, before = path.strip(), before.strip().lower()
+        if not path:
+            return None, "file_changed needs a path"
+        problem = _path_problem("file_changed", path)
+        if problem:
+            return None, problem
+        if not _SHA256_RE.match(before):
+            return None, ("file_changed needs the BEFORE sha256 (64 hex chars), got %r"
+                          % before)
+        return ("file_changed", (path, before)), None
+
     return None, "unrecognised directive %r" % kind
 
 
@@ -1349,6 +1590,30 @@ def run_check(node, check):
 
     def remote(cmd):
         return ssh_node(node, cmd, timeout=VERIFY_TIMEOUT)
+
+    if kind == "file_changed":
+        path, before = args
+        if local:
+            if not os.path.exists(path):
+                return False, "file_changed %s -> NOFILE (artifact absent)" % path
+            rc, out = _capture(["sha256sum", path])
+            if rc is None:
+                return None, "sha256sum %s did not run: %s" % (path, out[:120])
+        else:
+            ok, out = remote("if [ -e %s ]; then sha256sum %s; else echo NOFILE; fi"
+                             % (shlex.quote(path), shlex.quote(path)))
+            if not ok:
+                return None, "file_changed %s on %s UNREACHABLE: %s" % (
+                    path, node, (out or "")[:120])
+            if "NOFILE" in (out or ""):
+                return False, "file_changed %s on %s -> NOFILE (artifact absent)" % (
+                    path, node)
+        got = (out or "").split()
+        got = got[0].lower() if got else ""
+        changed = bool(got) and got != before
+        return changed, "file_changed %s -> now %s, before %s -> %s" % (
+            path, (got or "?")[:12], before[:12],
+            "CHANGED" if changed else "UNCHANGED")
 
     if kind == "file_exists":
         path = args[0]
@@ -2416,6 +2681,33 @@ class Poller:
         self._rep_idx, self._rep_ts = idx, now
         return idx
 
+    def release_held_claims(self, reason):
+        """Release every row THIS cycle claimed. Used only on the fail-closed path.
+
+        Why the PARENT key: the usual reason to be here is that the derived credential
+        is no longer trustworthy, so releasing with it could fail for the same reason the
+        refresh did. The parent key is still in memory and still valid.
+
+        The row is set to Blocked with the reason - the gateway's own executor-writable
+        terminal state - so the lease is released and a human can see why. Rows that
+        cannot be released are logged, never retried silently.
+        """
+        released = []
+        for action in self.actions:
+            if action.get("kind") != "claimed" or not action.get("row"):
+                continue
+            rid = action["row"]
+            try:
+                gateway_patch(rid, {"status": "Blocked",
+                                    "re_opened_or_retry_reason": "fail-closed: " + reason},
+                              nonce=nonce_get(rid), use_parent=True)
+                nonce_drop(rid)
+                released.append(rid)
+            except Exception as exc:  # noqa: BLE001
+                log("row %s: could not release after refresh failure: %s"
+                    % (rid, str(exc)[:160]), "ERROR")
+        return released
+
     def intake(self, rows, index):
         started = 0
         # MAX_PER_DAY was previously declared, parsed and reported but NEVER
@@ -2504,7 +2796,7 @@ class Poller:
                     "criterion as exit_zero or as one or more space-separated "
                     "kind:value directives (file_exists:/abs/path, file_md5:/abs/path=hex, "
                     "file_sha256:/abs/path=hex, http_200:url, http_status:url=code, "
-                    "git_ls_remote:repo@branch=sha)." % detail)
+                    "git_ls_remote:repo@branch=sha, file_changed:/abs/path=sha256_before)." % detail)
                 self.bus.patch(rid, {"status": "Blocked", "machines_response": note},
                                "unparseable success_criterion -> Blocked (row 123 defect 2)")
                 self.record("claim-blocked-criterion", rid, detail)
@@ -2670,6 +2962,18 @@ class Poller:
             fcntl.flock(lock_fh, fcntl.LOCK_UN)
             lock_fh.close()
 
+    def _refresh_preflight(self):
+        """Start/verify the client-side ephemeral credential. FAILS CLOSED.
+
+        No-op unless BARE_AI_CLIENT_REFRESH is on, so an un-opted-in node is unchanged.
+        Called before the first gateway read of a cycle: a runtime that cannot hold a
+        valid credential must not claim work it may be unable to finish.
+        """
+        ok, detail = client_credential_status()
+        log("credential: %s" % detail, "INFO" if ok else "ERROR")
+        if not ok:
+            raise EphemeralCredentialError(detail)
+
     def _cycle_locked(self, summary):
         if self.paused():
             log("KILL SWITCH present (%s) - exiting without action" % KILL_SWITCH, "WARN")
@@ -2692,6 +2996,19 @@ class Poller:
         # picked up without a restart.
         self.bus.refresh_auth()
 
+        # PK-16/304-C (row 477): establish/verify the client-side ephemeral
+        # credential BEFORE the first gateway read. Fail closed: a cycle that
+        # cannot hold a valid credential does nothing at all.
+        if CLIENT_REFRESH_ENABLED:
+            try:
+                self._refresh_preflight()
+            except EphemeralCredentialError as exc:
+                log("REFRESH PREFLIGHT FAILED - refusing to act this cycle: %s"
+                    % exc, "ERROR")
+                self.record("refresh-failed", 0, str(exc)[:200])
+                summary["refresh_failed"] = True
+                return self.heartbeat(summary)
+
         rows = self.bus.all_rows()
         index = {r["id"]: r for r in rows}
 
@@ -2710,8 +3027,19 @@ class Poller:
         # considered "acting on" a non-actable status.
         self.enforce_cancellations(rows)
 
-        self.reconcile(actable, index)       # reconciliation FIRST
-        self.intake(actable, index)
+        try:
+            self.reconcile(actable, index)       # reconciliation FIRST
+            self.intake(actable, index)
+        except EphemeralCredentialError as exc:
+            # Fail closed mid-cycle: the credential may already be dead. Release
+            # whatever this cycle claimed so no row is held by a dead runtime,
+            # then halt. Continuing would mean acting on an expired credential.
+            log("REFRESH LOST mid-cycle (%s) - releasing claims and halting" % exc,
+                "ERROR")
+            released = self.release_held_claims(str(exc)[:160])
+            self.record("refresh-lost", 0, "released=%s" % released)
+            summary["refresh_failed"] = True
+            return self.heartbeat(summary)
 
         summary["stuck"] = sum(1 for a in self.actions if a["kind"].startswith("stuck"))
         # NOTE: dry-run "would-claim" actions must NOT count toward the daily cap.
