@@ -551,6 +551,11 @@ AGENT_KEY_SECRET_PATH = os.environ.get("AGENT_KEY_SECRET_PATH", "").strip()
 GATEWAY_BASE = os.environ.get("TASKBUS_GATEWAY_BASE", "").rstrip("/")
 GATEWAY_UA = "bare-ai-taskbus-poller/332-gateway-only"
 
+# POLLER_GATEWAY_ONLY (2026-11-06): a worker that holds only a machine API key has no
+# Baserow identity to log in with, and must not need one. Opt-in, so every existing node
+# keeps its current behaviour byte-for-byte.
+GATEWAY_ONLY = os.environ.get("POLLER_GATEWAY_ONLY", "").strip().lower() in ("1", "true", "yes")
+
 # Fields the dispatcher owns. The gateway drops them silently (400 if they are the
 # only fields sent), so the client strips them locally: a write that looks accepted
 # while changing nothing is worse than a refused one.
@@ -977,7 +982,7 @@ class TaskBus:
     def __init__(self, dry_run=True):
         env = load_env()
         base = (env.get("BASEROW_URL") or os.environ.get("BASEROW_URL") or "").strip()
-        if not base:
+        if not base and not GATEWAY_ONLY:
             raise RuntimeError(
                 "BASEROW_URL is not configured: set it in %s or in the environment. There "
                 "is no built-in default, because a wrong default makes a node look "
@@ -985,12 +990,21 @@ class TaskBus:
         self.base = base.rstrip("/")
         self._jwt = None
         self.identity_email = None
-        self.refresh_auth()
+        if not GATEWAY_ONLY:
+            self.refresh_auth()
         self.dry_run = dry_run
         self.writes = 0
 
     def refresh_auth(self):
         """Acquire a fresh JWT for THIS machine's poller identity. FAILS CLOSED."""
+        if GATEWAY_ONLY:
+            # A gateway-only worker has no Baserow identity, and needs none: every row
+            # read and write goes through TASKBUS_GATEWAY_BASE, which fails closed on an
+            # unauthenticated call. Nothing may be sent as "JWT " - _req has no callers
+            # in this mode.
+            self.identity_email = None
+            self._jwt = None
+            return
         try:
             email, tok = poller_baserow_jwt(self.base)
         except Exception as exc:
@@ -1340,6 +1354,15 @@ def resolve_target(row, rep_index, mode, self_rep):
     reps = rep_ids(row)
     if self_rep is not None and reps and self_rep not in reps:
         return None, "not-mine", "6378=%s excludes self_rep=%s" % (reps, self_rep)
+    # SELF CASE (2026-11-06), GATED ON GATEWAY_ONLY so every existing node keeps its
+    # exact current decision path. If this node IS one of the row's owners, the routing
+    # question is already answered: the row is ours. Do NOT consult rep_index for it -
+    # that map only answers "which OTHER machine runs this", and building it needs a
+    # direct Baserow read that a gateway-only worker cannot make. SELF_HOST is the bare
+    # IP, i.e. exactly the value the index would have yielded, so is_local_node() and
+    # every downstream comparison behave identically.
+    if GATEWAY_ONLY and reps and self_rep is not None and self_rep in reps:
+        return SELF_HOST, "self", "6378=%s contains self_rep=%s" % (reps, self_rep)
     if reps:
         mapped = [rep_index[r] for r in reps if r in rep_index]
         if mapped:
@@ -2709,6 +2732,11 @@ class Poller:
 
     def rep_index(self):
         """rep row id -> node ip, from table 43, cached for 10 minutes."""
+        if GATEWAY_ONLY:
+            # Never open a Baserow connection from a gateway-only worker. The map cannot
+            # be needed either: rows this node owns are resolved by the self case in
+            # resolve_target, and rows it does not own are refused there as "not-mine".
+            return {}
         now = time.time()
         if self._rep_idx is not None and (now - self._rep_ts) < 600:
             return self._rep_idx
