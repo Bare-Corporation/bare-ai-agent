@@ -1534,7 +1534,11 @@ def parse_check(spec):
         # a refactor is only done when the thing being removed is actually gone.
         if "=" not in rest:
             return None, "file_excludes needs PATH=TEXT"
-        path, lit = rest.rsplit("=", 1)
+        # split on the FIRST "=": the grammar is <path>=<text>, and the TEXT may itself
+        # contain "=" (e.g. RESULT=FAIL). rsplit here silently turned the text into part of
+        # the path, so the check looked for a file named "<path>=RESULT" and failed with a
+        # NOFILE message that read exactly like a missing artefact (row 515, 2026-11-06).
+        path, lit = rest.split("=", 1)
         path, lit = path.strip(), lit.strip()
         if not path:
             return None, "file_excludes needs a path"
