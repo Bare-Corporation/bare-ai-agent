@@ -139,3 +139,28 @@ of the public contract: external machines never see it, and internal ones are mo
   - When a ticket's criterion cannot express the work (a behavioural requirement, a route that must
     function rather than merely exist), say so on the row and require a named verifier. Do not author a
     criterion that passes before the work happens.
+
+## 8. Pull the taskbus how-to on demand (JIT), do not carry it
+
+An agent does not need the task-bus operating manual in its prompt. Carrying it costs context on every
+job and it goes stale the moment the manual is revised. Pull it when - and only when - the agent needs to
+log a sub-ticket, chain a dependency, or change a criterion:
+
+    curl -s -H "User-Agent: bare-ai-orchestration-agent/1.0" \
+      "https://api.bare-ai.net/v1/council/bare-roles/taskbus_ops"
+
+The response body is the current, approved skill: schema-change warnings, the create/read/list/claim/
+update/close contract, the criterion grammar, and the reopen route. It is public, so an external agent can
+fetch it with no key at all. The User-Agent header is mandatory on this host - without it the edge answers
+403 and the failure looks like a permissions problem.
+
+When to fetch it:
+  - before creating your first sub-ticket in a session;
+  - before setting a success_criterion by hand (the grammar has no file_contains, and file_excludes needs
+    the file to exist);
+  - before moving a ticket through a state you have not used in this session.
+
+When NOT to fetch it:
+  - for a plain claim/execute/report cycle you have already done successfully in this session;
+  - on every cycle of a polling loop. Fetch once, keep it in session context, and re-fetch only after a
+    gateway deploy that changes the contract.
