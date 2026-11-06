@@ -49,6 +49,63 @@ SHELL_RULES = chr(10).join([
 ]) + chr(10) + chr(10)
 
 
+# ---------------------------------------------------- 3-TIER CONTEXT INJECTION
+# The CLI has no internal system channel that reads these files (verified 2026-11-06: the bundle
+# contains no reference to technical-constitution and reads no file under ~/.bare-ai), so the RUNNER
+# must deliver them. Without this an executor agent is ungoverned: on 2026-11-06 a sub-agent on .16
+# burned every pass on blocked command substitution because nothing had ever told it the rule.
+#
+# Tier 1 technical-constitution.md is MANDATORY and has a repo fallback; a missing Tier 1 is loud.
+# Tier 2 bare-environment.md (public role) and Tier 3 bare-archetype.md (private role) are optional
+# by design: a node migrated off role.md carries the environment file instead, and not every node
+# has an archetype.
+CONST_PATH = os.path.join(HOME, ".bare-ai", "technical-constitution.md")
+CONST_FALLBACK = os.path.join(HOME, "bare-ai-agent", "scripts", "templates",
+                             "technical-constitution.md")
+ENV_PATH = os.path.join(HOME, ".bare-ai", "bare-environment.md")
+ARCH_PATH = os.path.join(HOME, ".bare-ai", "bare-archetype.md")
+
+
+def _read_context(path):
+    """Return the file body, or an empty string when absent. Never raises."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def build_context_preamble():
+    """Assemble the 3-tier context preamble. Returns (text, sizes) so the caller can log it.
+
+    Deterministic: same files in, same preamble out, no clock, no network, no ordering surprises.
+    """
+    const = _read_context(CONST_PATH)
+    const_src = "node"
+    if not const:
+        const = _read_context(CONST_FALLBACK)
+        const_src = "repo-template" if const else "MISSING"
+    if not const:
+        sys.stderr.write(
+            "target-job: WARNING Tier 1 technical-constitution.md is MISSING at %s and the repo "
+            "template at %s was not readable - this job runs WITHOUT the technical constitution. "
+            "That is a node defect, not a ticket defect.\n" % (CONST_PATH, CONST_FALLBACK))
+    env_body = _read_context(ENV_PATH)
+    arch = _read_context(ARCH_PATH)
+    parts = []
+    if const:
+        parts.append("# SYSTEM CONTEXT & OPERATIONAL CONSTITUTION\n" + const)
+    if env_body:
+        parts.append("# HOST ENVIRONMENT & PUBLIC ROLE (bare-environment)\n" + env_body)
+    if arch:
+        parts.append("# AGENT ARCHETYPE & PRIVATE ROLE (bare-archetype)\n" + arch)
+    text = "\n\n".join(parts)
+    if text:
+        text += "\n\n"
+    return text, {"constitution": len(const), "constitution_src": const_src,
+                  "environment": len(env_body), "archetype": len(arch)}
+
+
 def central_route(shortcut):
     """Resolve (endpoint, model, note) from the CENTRAL model list.
 
@@ -515,7 +572,12 @@ def main():
 
     task_path = os.path.join(cwd, ".taskbus-task.prompt")
     with open(task_path, "w", encoding="utf-8") as fh:
-        fh.write(SHELL_RULES + task)
+        _ctx, _ctx_sizes = build_context_preamble()
+        sys.stderr.write(
+            "target-job: context tiers constitution=%dB(%s) environment=%dB archetype=%dB\n"
+            % (_ctx_sizes["constitution"], _ctx_sizes["constitution_src"],
+               _ctx_sizes["environment"], _ctx_sizes["archetype"]))
+        fh.write(_ctx + SHELL_RULES + task)
 
     feedback = ""
     last_report = []
