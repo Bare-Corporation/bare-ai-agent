@@ -1,0 +1,48 @@
+{
+  "attempts_taken": 1,
+  "claimed_at": "2026-01-01T00:00:00Z",
+  "execution_profile": {
+    "config_hash": "b4ed2a9ca20aca950803abbdaf8c066f910b60b61eab065e63b45fce1b3ef8e7",
+    "profile_hash": "77178ca2641f216c89e49b1c76415b4c2d34fb779abd3e68e7af4dcb148b2664",
+    "profile_id": 1,
+    "resolved_at": "2026-01-01T00:00:00Z",
+    "role": {
+      "alias": "example_role",
+      "content_sha256": "52a2007d5cdb74c453eb7ce4fad39b336fa36d9925d3022b4a28b58ddffd6723"
+    },
+    "slug": "example-profile",
+    "snapshot": {
+      "execution_config": {
+        "exclude_providers": [],
+        "max_attempts": 3,
+        "require_human_review": true,
+        "role_alias": "example_role",
+        "role_content_sha256": "52a2007d5cdb74c453eb7ce4fad39b336fa36d9925d3022b4a28b58ddffd6723",
+        "routing_ceiling_eur": null,
+        "routing_strategy": "cheapest_frontier"
+      },
+      "profile": {
+        "id": 1,
+        "owner_stakeholder_id": null,
+        "slug": "example-profile",
+        "version": 1,
+        "visibility": "public"
+      },
+      "role": {
+        "alias": "example_role",
+        "content_markdown": "# ——————————————————————————————————————————————————————————————————————————\n# EXAMPLE DEVELOPMENT ROLE  v1.0\n# ——————————————————————————————————————————————————————————————————————————\n\n**Issued:** 2026-01-01\n**Machine:** agent@example.invalid (tunnel 203.0.113.7)\n**Read order:** technical constitution FIRST, then this file.\n\n## SCOPE (authoritative)\n\nThis machine maintains exactly two example projects:\n\n| Project | Local path | Git remote |\n|---|---|---|\n| example-agent | ~/example-agent | git@example.invalid:example/example-agent.git |\n| example-cli | ~/example-cli | git@example.invalid:example/example-cli.git |\n\nAny local copy of anything else is NOT authoritative — treat it as stale.\n\n## ROLE-SPECIFIC RULES\n1. **Secrets come from the secret store** — never hardcode tokens or passwords.\n2. **Git**: commit only to the two remotes above — no exceptions.\n3. **Diary**: log to the workspace diary directory.\n\n## FORBIDDEN ACTIONS\n- Do not deploy, restart or modify production services — another node owns those.\n- Do not treat an archived checkout as production.\n\n## NOTES\n- This is synthetic fixture text. Every name, address and path here is\n  illustrative and resolves to nothing — it exists only so the\n  snapshot verifier has a representative multi-byte role body to hash.\n",
+        "content_sha256": "52a2007d5cdb74c453eb7ce4fad39b336fa36d9925d3022b4a28b58ddffd6723",
+        "row_id": 1
+      },
+      "snapshot_version": 1
+    },
+    "version": 1
+  },
+  "lease_expires_at": "2026-01-01T00:15:00Z",
+  "lease_seconds": 900,
+  "machine": "agent@example.invalid",
+  "nonce": "00000000000000000000000000000000",
+  "row_id": 1,
+  "status": "InProgress",
+  "token_key_id": 1
+}
