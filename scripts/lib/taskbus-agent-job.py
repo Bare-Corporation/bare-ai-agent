@@ -22,6 +22,25 @@ VAULT_SECRET_PATH = "secret/data/bare-ai-brain/config"
 VAULT_KEY_FIELD = "api_key"
 CA_FILE = os.path.join(HOME, ".bare-ai", "ca", "vault-ca.crt")
 
+# ---- T4 (row 529): pinned execution-profile verification -------------------
+# The gateway stamps an immutable execution_profile snapshot on every
+# successful claim. This runner re-derives every hash before it executes
+# anything, so a row can never run under role text the gateway did not verify.
+# The module lives beside the repo copy; the DEPLOYED runner lives in
+# ~/.bare-ai/lib, so both candidate directories are searched.
+_PC_DIRS = [os.path.dirname(os.path.abspath(__file__)),
+            os.path.join(HOME, "bare-ai-agent", "scripts", "lib")]
+for _d in _PC_DIRS:
+    if os.path.isdir(_d) and _d not in sys.path:
+        sys.path.append(_d)
+_pc = None
+_PC_ERROR = ""
+try:
+    import profile_context as _pc
+except Exception as _exc:  # noqa: BLE001
+    _PC_ERROR = "%s: %s" % (type(_exc).__name__, _exc)
+
+
 
 CENTRAL_MODELS_URL = "https://api.bare-ai.net/v1/models"
 DEFAULT_SHORTCUT = os.environ.get("TASKBUS_MODEL_SHORTCUT", "303")
@@ -75,7 +94,7 @@ def _read_context(path):
         return ""
 
 
-def build_context_preamble():
+def build_context_preamble(pinned_role=None, pinned_label=""):
     """Assemble the 3-tier context preamble. Returns (text, sizes) so the caller can log it.
 
     Deterministic: same files in, same preamble out, no clock, no network, no ordering surprises.
@@ -95,10 +114,15 @@ def build_context_preamble():
     parts = []
     if const:
         parts.append("# SYSTEM CONTEXT & OPERATIONAL CONSTITUTION\n" + const)
-    if env_body:
-        parts.append("# HOST ENVIRONMENT & PUBLIC ROLE (bare-environment)\n" + env_body)
-    if arch:
-        parts.append("# AGENT ARCHETYPE & PRIVATE ROLE (bare-archetype)\n" + arch)
+    if pinned_role:
+        # T4: a gateway-pinned role REPLACES the local role tiers. Executing the
+        # snapshot is the whole point - a local file that disagrees must never win.
+        parts.append("# PINNED EXECUTION-PROFILE ROLE (" + (pinned_label or "snapshot") + ")" + "\n" + pinned_role)
+    else:
+        if env_body:
+            parts.append("# HOST ENVIRONMENT & PUBLIC ROLE (bare-environment)\n" + env_body)
+        if arch:
+            parts.append("# AGENT ARCHETYPE & PRIVATE ROLE (bare-archetype)\n" + arch)
     text = "\n\n".join(parts)
     if text:
         text += "\n\n"
@@ -475,7 +499,211 @@ def _execute_criterion(spec):
     return ok_all, lines
 
 
+def load_claim_snapshot():
+    """Return (ctx, reason). ctx is None when no snapshot was supplied.
+
+    reason is None on success (or when nothing was supplied), and a structured
+    failure code when the snapshot exists but cannot be trusted. The caller MUST
+    refuse to execute whenever reason is not None.
+    """
+    path = (os.environ.get("TASKBUS_CLAIM_FILE") or "").strip()
+    raw = (os.environ.get("TASKBUS_CLAIM_JSON") or "").strip()
+    payload = None
+    if path:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError) as exc:
+            return None, "claim_snapshot_unreadable:%s" % exc
+    elif raw:
+        try:
+            payload = json.loads(raw)
+        except ValueError as exc:
+            return None, "claim_snapshot_unreadable:%s" % exc
+    else:
+        return None, None
+
+    if _pc is None:
+        return None, "profile_context_unavailable:%s" % _PC_ERROR
+    if not isinstance(payload, dict) or "execution_profile" not in payload:
+        # Fail closed: a claim with no profile block must never silently downgrade
+        # to the local role, which is the exact defect this ticket exists to stop.
+        return None, "profile_snapshot_missing"
+    try:
+        ctx = _pc.verify(payload)
+    except _pc.ProfileHashMismatch as exc:
+        return None, "profile_hash_mismatch:%s" % exc.which
+    except _pc.ProfileContextError as exc:
+        return None, "profile_snapshot_unusable:%s" % exc
+    except Exception as exc:  # noqa: BLE001
+        return None, "profile_snapshot_unusable:%s: %s" % (type(exc).__name__, exc)
+    return ctx, None
+
+
+def apply_snapshot_router(ctx, env):
+    """Export the snapshot routing config and enforce what is enforceable here."""
+    cfg = (ctx or {}).get("router") or {}
+    if not cfg:
+        return []
+    notes = []
+    strategy = cfg.get("routing_strategy")
+    ceiling = cfg.get("routing_ceiling_eur")
+    if strategy:
+        env["BARE_TASKBUS_ROUTING_STRATEGY"] = str(strategy)
+    if ceiling is not None:
+        env["BARE_TASKBUS_ROUTING_CEILING_EUR"] = str(ceiling)
+    excluded = cfg.get("exclude_providers") or []
+    if excluded:
+        env["BARE_TASKBUS_EXCLUDE_PROVIDERS"] = ",".join(str(p) for p in excluded)
+        chosen = "%s %s" % (env.get("BARE_AI_ENDPOINT") or "", env.get("BARE_AI_MODEL") or "")
+        for provider in excluded:
+            if str(provider).lower() and str(provider).lower() in chosen.lower():
+                notes.append("route %r is an EXCLUDED provider" % str(provider))
+    return notes
+
+
+
+# --------------------------------------------------------------- T4 profile gate
+# A claim that carries an execution_profile snapshot must be VERIFIED before the
+# job runs. profile_context re-derives all three hashes under the gateway's
+# canonicalisation; any mismatch stops the job.
+PROFILE_CTX_MAX_BYTES = 2 * 1024 * 1024
+_PROFILE_MOD = {"tried": False, "mod": None}
+
+
+class ProfileGateFailure(Exception):
+    """The snapshot cannot be trusted. The job must NOT execute."""
+    reason = "profile_hash_mismatch"
+
+    def __init__(self, which="", detail=""):
+        self.which = which
+        self.detail = detail
+        super().__init__("%s:%s %s" % (self.reason, which, detail))
+
+
+class ProfileGateUnusable(ProfileGateFailure):
+    """No usable snapshot where one was required."""
+    reason = "profile_snapshot_unusable"
+
+
+def _load_profile_context():
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    extra = (os.environ.get("BARE_PROFILE_CONTEXT_DIR") or "").strip()
+    for d in ([here] + ([extra] if extra else [])):
+        p = os.path.join(d, "profile_context.py")
+        if os.path.exists(p):
+            spec = importlib.util.spec_from_file_location("profile_context", p)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    return None
+
+
+def profile_context_module():
+    if not _PROFILE_MOD["tried"]:
+        _PROFILE_MOD["tried"] = True
+        _PROFILE_MOD["mod"] = _load_profile_context()
+    return _PROFILE_MOD["mod"]
+
+
+def load_claim_payload():
+    """Return (payload, source). Inline JSON wins over a file path."""
+    raw = (os.environ.get("TASKBUS_CLAIM_JSON") or "").strip()
+    if raw:
+        try:
+            return json.loads(raw), "inline"
+        except ValueError as exc:
+            raise ProfileGateUnusable("claim_json_unparseable", str(exc))
+    path = (os.environ.get("TASKBUS_CLAIM_PAYLOAD") or "").strip()
+    if not path:
+        return None, "absent"
+    try:
+        if os.path.getsize(path) > PROFILE_CTX_MAX_BYTES:
+            raise ProfileGateUnusable("claim_payload_too_large", path)
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), path
+    except (OSError, ValueError) as exc:
+        raise ProfileGateUnusable("claim_payload_unreadable", str(exc))
+
+
+def profile_gate(required=False):
+    """Verify the claim snapshot. Returns ctx, or None when no payload shipped.
+
+    A row bound to an execution profile must never silently fall back to the
+    node's local role - that is the downgrade this gate exists to prevent, so
+    required=True turns an absent payload into a refusal.
+    """
+    pc = profile_context_module()
+    if pc is None:
+        raise ProfileGateUnusable("verifier_missing", "profile_context.py not found")
+    payload, _source = load_claim_payload()
+    if payload is None:
+        if required:
+            raise ProfileGateUnusable(
+                "snapshot_absent", "profile-bound row shipped no claim payload")
+        return None
+    try:
+        return pc.verify(payload)
+    except pc.ProfileHashMismatch as exc:
+        raise ProfileGateFailure(getattr(exc, "which", "unknown"), exc.detail) from exc
+    except pc.ProfileContextError as exc:
+        raise ProfileGateUnusable(getattr(exc, "code", "unusable"), str(exc)) from exc
+
+
+def write_snapshot_role(ctx, cwd):
+    """Materialise the verified role markdown so it, not role.md, is injected."""
+    path = os.path.join(cwd, ".taskbus-role.md")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(ctx["system_prompt"])
+    return path
+
+
+def profile_gate_stamp(ctx):
+    return profile_context_module().audit_stamp(ctx)
+
+
+def profile_gate_json(ctx=None, failure=None):
+    if failure is not None:
+        body = {"ok": False, "reason": failure.reason, "which": failure.which}
+    elif ctx is None:
+        body = {"ok": True, "applied": False}
+    else:
+        body = {"ok": True, "applied": True, "slug": ctx["slug"],
+                "profile_hash": ctx["profile_hash"],
+                "config_hash": ctx["config_hash"],
+                "role_content_sha256": ctx["role_content_sha256"],
+                "routing_strategy": ctx["router"]["routing_strategy"],
+                "routing_ceiling_eur": ctx["router"]["routing_ceiling_eur"],
+                "markdown_bytes": ctx["markdown_bytes"]}
+    return "PROFILE_GATE_JSON: " + json.dumps(body, sort_keys=True)
+
+
+def verify_only_cli(argv):
+    """Exercise the gate on the DEPLOYED artefact without calling a model."""
+    required = "--required" in argv
+    try:
+        ctx = profile_gate(required=required)
+    except ProfileGateFailure as exc:
+        print("PROFILE_GATE: FAILED reason=%s which=%s detail=%s"
+              % (exc.reason, exc.which, exc.detail[:200]))
+        print(profile_gate_json(failure=exc))
+        return 78
+    if ctx is None:
+        print("PROFILE_GATE: NO_PAYLOAD (gate inert; row not profile-bound)")
+        print(profile_gate_json(ctx=None))
+        return 0
+    print("PROFILE_GATE: VERIFIED slug=%s v%s" % (ctx["slug"], ctx["version"]))
+    for c in ctx["checks"]:
+        print("  %-42s %s  %s"
+              % (c["name"], "OK" if c["ok"] else "MISMATCH", c["expected"][:16]))
+    print("PROFILE_GATE: AUDIT " + profile_gate_stamp(ctx))
+    print(profile_gate_json(ctx=ctx))
+    return 0
+
 def main():
+    if "--verify-only" in sys.argv:
+        return verify_only_cli(sys.argv)
     if len(sys.argv) < 2:
         print("usage: taskbus-agent-job.py <prompt_file> [workspace_dir]", file=sys.stderr)
         return 2
@@ -485,6 +713,38 @@ def main():
     except OSError as e:
         print("cannot read prompt file %s: %s" % (pf, e), file=sys.stderr)
         return 2
+
+    # ---- T4 GATE: verify the pinned execution-profile snapshot BEFORE any work.
+    # Fail closed: a mismatch means the row does not execute at all, and the
+    # poller blocks it on this exit code plus the structured reason line.
+    _snap_ctx, _snap_reason = load_claim_snapshot()
+    if _snap_reason is not None:
+        print("target-job: PROFILE_VERIFICATION_FAILED reason=%s" % _snap_reason)
+        print("target-job: REFUSING TO EXECUTE on an unverified snapshot",
+              file=sys.stderr)
+        return 3
+    if _snap_ctx is not None:
+        global MAX_PASSES
+        _cfg = _snap_ctx.get("router") or {}
+        print("target-job: profile verified %s" % _pc.audit_stamp(_snap_ctx))
+        try:
+            _cap = int(_cfg.get("max_attempts") or 0)
+        except (TypeError, ValueError):
+            _cap = 0
+        if _cap > 0 and _cap < MAX_PASSES:
+            print("target-job: pass cap from snapshot max_attempts: %d -> %d"
+                  % (MAX_PASSES, _cap))
+            MAX_PASSES = _cap
+        _stamp = _pc.audit_stamp(_snap_ctx)
+        _stamp_file = (os.environ.get("TASKBUS_AUDIT_FILE") or "").strip()
+        if _stamp_file:
+            try:
+                with open(_stamp_file, "w", encoding="utf-8") as _sfh:
+                    _sfh.write(_stamp + chr(10))
+            except OSError as _se:
+                print("target-job: audit stamp not written: %s" % _se)
+    else:
+        print("target-job: no claim snapshot supplied - legacy path, no profile gate")
 
     # ---- PINNED WORKING DIRECTORY ----------------------------------------
     # Sessions are CWD-SCOPED. A fixed per-job directory is what makes --resume latest safe;
@@ -500,6 +760,20 @@ def main():
 
     # The task envelope only. The CLI loads the constitution through its own system channel;
     # prepending role.md + constitution here was pure dilution (~235 KB per job).
+    # ---- T4: verify the execution-profile snapshot BEFORE anything executes ----
+    _req = (os.environ.get("TASKBUS_PROFILE_REQUIRED") or "").strip().lower()
+    profile_ctx = None
+    try:
+        profile_ctx = profile_gate(required=_req in ("1", "true", "yes"))
+    except ProfileGateFailure as _exc:
+        sys.stderr.write(("target-job: PROFILE_GATE FAILED reason=%s which=%s - "
+                          "job NOT attempted" % (_exc.reason, _exc.which)) + chr(10))
+        print(profile_gate_json(failure=_exc))
+        return 78
+    if profile_ctx is not None:
+        print("target-job: execution_profile VERIFIED %s"
+              % profile_gate_stamp(profile_ctx))
+
     taskbus_row_id, taskbus_title = taskbus_ticket_meta(task)
     print("target-job: baserow_row=%s title=%s" % (taskbus_row_id, taskbus_title))
 
@@ -569,15 +843,38 @@ def main():
         env["NODE_EXTRA_CA_CERTS"] = ca
     env["BARE_AI_NO_TOOLS"] = "false"          # explicit; --tools is passed too, belt and braces
     env.setdefault("BARE_AI_DISABLE_WORKSPACE_TRUST", "true")
+    if profile_ctx is not None:
+        _role_path = write_snapshot_role(profile_ctx, cwd)
+        env["BARE_AI_SYSTEM_MD"] = _role_path
+        print("target-job: system prompt source = VERIFIED SNAPSHOT "
+              "(%d bytes, profile=%s) - local role file NOT used"
+              % (profile_ctx["markdown_bytes"], profile_ctx["slug"]))
+    if _snap_ctx is not None:
+        _route_notes = apply_snapshot_router(_snap_ctx, env)
+        for _n in _route_notes:
+            print("target-job: ROUTER WARNING %s" % _n)
 
     task_path = os.path.join(cwd, ".taskbus-task.prompt")
     with open(task_path, "w", encoding="utf-8") as fh:
-        _ctx, _ctx_sizes = build_context_preamble()
+        if _snap_ctx is not None:
+            _label = "profile=%s v%s" % (_snap_ctx.get("slug"), _snap_ctx.get("version"))
+            _ctx, _ctx_sizes = build_context_preamble(
+                pinned_role=_snap_ctx.get("system_prompt"), pinned_label=_label)
+        else:
+            _ctx, _ctx_sizes = build_context_preamble()
         sys.stderr.write(
             "target-job: context tiers constitution=%dB(%s) environment=%dB archetype=%dB\n"
             % (_ctx_sizes["constitution"], _ctx_sizes["constitution_src"],
                _ctx_sizes["environment"], _ctx_sizes["archetype"]))
-        fh.write(_ctx + SHELL_RULES + task)
+        if profile_ctx is not None:
+            fh.write(_ctx + SHELL_RULES
+                     + "EXECUTION PROFILE ROLE (verified snapshot "
+                     + profile_ctx["slug"] + ", role hash "
+                     + profile_ctx["role_content_sha256"][:16] + ")"
+                     + chr(10) + chr(10)
+                     + profile_ctx["system_prompt"] + chr(10) + chr(10) + task)
+        else:
+            fh.write(_ctx + SHELL_RULES + task)
 
     feedback = ""
     last_report = []
