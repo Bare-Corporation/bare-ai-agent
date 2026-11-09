@@ -1139,6 +1139,11 @@ class TaskBus:
             claim = gateway_claim(rid)
         except GatewayError as exc:
             return False, str(exc)[:300]
+        # 2026-11-09 (T4): the claim response carries the gateway-stamped
+        # execution_profile snapshot. Keep it so the dispatch path can ship it to the
+        # runner, which verifies it before executing. Dropping it here is what left the
+        # runner-side gate inert (release-ledger lines 40/41).
+        self.last_claim = claim
         nonce = claim.get("nonce") or ""
         if not nonce:
             return False, "gateway returned no claim nonce"
@@ -2384,6 +2389,27 @@ class Poller:
                 _env += "TASKBUS_JOB_CWD=%s " % _shlex.quote(_cwd)
             log("row %s: shipping %d criterion check(s) + cwd=%s to the runner"
                 % (rid, len(_parsed), _cwd))
+            # 2026-11-09 (T4): ship the claim payload the runner must verify. The file
+            # travels by scp like the prompt does, so the child never needs Baserow
+            # credentials of its own and a long payload cannot be argv-mangled.
+            _claim = getattr(self.bus, "last_claim", None)
+            if _claim:
+                _local_claim = "/tmp/taskbus-%s.claim.json" % juuid
+                with open(_local_claim, "w", encoding="utf-8") as _cfh:
+                    json.dump(_claim, _cfh)
+                _remote_claim = "/tmp/taskbus-%s.claim.json" % juuid
+                _ccp = subprocess.run(
+                    ["scp", "-q"] + SSH_OPTS
+                    + [_local_claim, "%s@%s:%s" % (SSH_USER, node, _remote_claim)],
+                    capture_output=True, text=True, timeout=90)
+                if _ccp.returncode != 0:
+                    raise RuntimeError("claim payload scp failed: %s"
+                                       % ((_ccp.stderr or "").strip()[:160],))
+                _req = "1" if _claim.get("execution_profile") else "0"
+                _env = ("TASKBUS_CLAIM_PAYLOAD=%s TASKBUS_PROFILE_REQUIRED=%s %s"
+                        % (_shlex.quote(_remote_claim), _req, _env))
+                log("row %s: shipped claim payload (%d bytes) profile_required=%s"
+                    % (rid, os.path.getsize(_local_claim), _req))
             cmd = ("%ssetsid nohup bash %s %s python3 %s %s >/dev/null 2>&1 &"
                    % (_env, REMOTE_DISPATCHER, juuid, REMOTE_RUNNER, remote_pf))
             ok, out = ssh_node(node, cmd)
@@ -2464,6 +2490,18 @@ class Poller:
         _cwd = _cwd.strip() if isinstance(_cwd, str) else ""
         if _cwd:
             env["TASKBUS_JOB_CWD"] = _cwd
+        # 2026-11-09 (T4): the self path needs the same claim payload the remote path
+        # ships, or a self-target job would run with the gate inert.
+        _claim = getattr(self.bus, "last_claim", None)
+        if _claim:
+            _local_claim = "/tmp/taskbus-%s.claim.json" % juuid
+            with open(_local_claim, "w", encoding="utf-8") as _cfh:
+                json.dump(_claim, _cfh)
+            _req = "1" if _claim.get("execution_profile") else "0"
+            env["TASKBUS_CLAIM_PAYLOAD"] = _local_claim
+            env["TASKBUS_PROFILE_REQUIRED"] = _req
+            log("row %s: local claim payload %d bytes profile_required=%s"
+                % (rid, os.path.getsize(_local_claim), _req))
         log("row %s: local dispatch shipping %d criterion check(s) + cwd=%s"
             % (rid, len(_parsed), _cwd))
         try:
@@ -2590,7 +2628,29 @@ class Poller:
         tail = (remote_log_tail(node, job_uuid_of(fresh)) if node
                 else job_log_tail(job_uuid_of(fresh)))
         attest = {}
-        if state.get("status") == "done":
+        if state.get("exit_code") == 78:
+            # 2026-11-09 (T4): exit 78 means taskbus-agent-job.py REFUSED the
+            # execution-profile snapshot and did not attempt the task. That is the
+            # machine-lock control firing, so it must never be graded as a completed
+            # run (which is why this branch precedes the status=="done" case) and the
+            # row is Blocked with the reason the runner reported rather than retried
+            # against the same bad snapshot.
+            _reason = "profile_hash_mismatch (runner verification refused snapshot)"
+            note = append_note(
+                fresh.get("machines_response"),
+                "BLOCKED: the runner refused the claim snapshot (exit 78). No task "
+                "was executed." + "\n" + "re_opened_or_retry_reason: " + _reason
+                + "\n" +
+                "--- executor output (tail) ---" + "\n" + tail)
+            self.bus.patch(rid, {"status": "Blocked",
+                                 "machines_response": note,
+                                 "re_opened_or_retry_reason": _reason},
+                           "runner refused the snapshot -> Blocked",
+                           allow_reclaim=False)
+            self.record("outcome-profile-hash-mismatch", rid,
+                        "exit 78; runner refused the execution-profile snapshot")
+            return
+        elif state.get("status") == "done":
             allowed, reasons, ver_evidence = completion_guard(
                 fresh, node=node, exit_code=state.get("exit_code"))
             if allowed:
