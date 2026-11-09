@@ -45,6 +45,10 @@ const NL = String.fromCharCode(10);
 const BACKSLASH = String.fromCharCode(92);
 const VAULT_SECRET_PATH = 'secret/data/bare-ai-council-v1/config';
 const VAULT_ENV_KEYS = ['VAULT_ADDR', 'VAULT_ROLE_ID', 'VAULT_SECRET_ID'];
+// VAULT_SECRET_ID is still PARSED (a non-CIDR-bound AppRole needs it) but it is not
+// required: a CIDR-bound AppRole authenticates with role_id alone. Mirrors bare-ai-cli
+// 619724fc1 and bare-ai-agent c42313b.
+const VAULT_REQUIRED_ENV_KEYS = ['VAULT_ADDR', 'VAULT_ROLE_ID'];
 const DEFAULT_TIMEOUT_SECONDS = DEFAULT_COUNCIL_TIMEOUT_MS / 1000;
 const DEFAULT_POLL_SECONDS = DEFAULT_COUNCIL_POLL_INTERVAL_MS / 1000;
 
@@ -277,13 +281,14 @@ async function resolveCouncilConfig(): Promise<{ apiKey: string; baseUrl: string
   }
 
   const creds = loadVaultEnv();
-  const missing = VAULT_ENV_KEYS.filter((key) => !creds[key]);
+  const missing = VAULT_REQUIRED_ENV_KEYS.filter((key) => !creds[key]);
   if (missing.length > 0) {
     fail(
       '[council] ERROR: Missing Vault credentials: ' +
         missing.join(', ') +
         NL +
-        'Ensure ~/.bare-ai/config/vault.env contains VAULT_ADDR, VAULT_ROLE_ID, and VAULT_SECRET_ID.',
+        'Ensure ~/.bare-ai/config/vault.env contains VAULT_ADDR and VAULT_ROLE_ID. ' +
+        'VAULT_SECRET_ID is optional, and needed only for a non-CIDR-bound AppRole.',
     );
   }
   const addr = creds['VAULT_ADDR'];
@@ -293,10 +298,13 @@ async function resolveCouncilConfig(): Promise<{ apiKey: string; baseUrl: string
     const login = await vaultJson(addr + '/v1/auth/approle/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        role_id: creds['VAULT_ROLE_ID'],
-        secret_id: creds['VAULT_SECRET_ID'],
-      }),
+      // Present secret_id only when it is set: a CIDR-bound AppRole authenticates with
+      // role_id alone. Mirrors bare-ai-cli 619724fc1 and bare-ai-agent c42313b.
+      body: JSON.stringify(
+        creds['VAULT_SECRET_ID']
+          ? { role_id: creds['VAULT_ROLE_ID'], secret_id: creds['VAULT_SECRET_ID'] }
+          : { role_id: creds['VAULT_ROLE_ID'] },
+      ),
     });
     token = optionalString(asRecord(asRecord(JSON.parse(login.body))['auth'])['client_token']);
   } catch (error: unknown) {

@@ -121,7 +121,13 @@ def _load_vault_env() -> dict:
 def _vault_approle_login(vault_addr: str, role_id: str, secret_id: str) -> str:
     """Authenticate with Vault via AppRole. Returns a short-lived client token."""
     url     = f"{vault_addr}/v1/auth/approle/login"
-    payload = json.dumps({"role_id": role_id, "secret_id": secret_id}).encode()
+    # A CIDR-bound AppRole carries no secret_id, and json.dumps would send the key as
+    # null or "" rather than omitting it - so build the body and leave it out when
+    # unset. Mirrors bare-ai-cli 619724fc1 and bare-ai-agent c42313b.
+    ident = {"role_id": role_id}
+    if secret_id:
+        ident["secret_id"] = secret_id
+    payload = json.dumps(ident).encode()
     req     = urllib.request.Request(
         url, data=payload,
         headers={"Content-Type": "application/json"},
@@ -158,19 +164,22 @@ def resolve_council_config() -> tuple[str, str]:
 
     # Priority 2: Vault AppRole (same mechanism as claude-sonnet-4-6, deepseek-v4-pro etc.)
     creds   = _load_vault_env()
-    missing = [k for k in ("VAULT_ADDR", "VAULT_ROLE_ID", "VAULT_SECRET_ID")
+    # VAULT_SECRET_ID is optional: a CIDR-bound AppRole (bind_secret_id=false)
+    # authenticates with role_id alone. Mirrors bare-ai-cli 619724fc1.
+    missing = [k for k in ("VAULT_ADDR", "VAULT_ROLE_ID")
                if not creds.get(k)]
     if missing:
         print(
             f"[council] ERROR: Missing Vault credentials: {', '.join(missing)}\n"
             f"Ensure ~/.bare-ai/config/vault.env contains "
-            f"VAULT_ADDR, VAULT_ROLE_ID, and VAULT_SECRET_ID.",
+            f"VAULT_ADDR and VAULT_ROLE_ID. VAULT_SECRET_ID is optional, and "
+            f"needed only for a non-CIDR-bound AppRole.",
             file=sys.stderr
         )
         sys.exit(1)
 
     token = _vault_approle_login(
-        creds["VAULT_ADDR"], creds["VAULT_ROLE_ID"], creds["VAULT_SECRET_ID"]
+        creds["VAULT_ADDR"], creds["VAULT_ROLE_ID"], creds.get("VAULT_SECRET_ID", "")
     )
 
     secret_url = f"{creds['VAULT_ADDR']}/v1/{VAULT_SECRET_PATH}"
