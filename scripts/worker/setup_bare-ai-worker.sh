@@ -1610,10 +1610,26 @@ if [ -f "$SECRET_SCAN_SH" ] && [ -f "$SECRET_UNIT_SRC/bare-untracked-secret-scan
     read -r SECRET_UID < "$SECRET_UID_TMP" || SECRET_UID=1000
     rm -f "$SECRET_UID_TMP"
     [ -n "$SECRET_UID" ] || SECRET_UID=1000
-    execute_command "sudo -u \"$TARGET_USER\" XDG_RUNTIME_DIR=\"/run/user/$SECRET_UID\" systemctl --user daemon-reload" "Reload user systemd units"
+    # sudo refuses environment assignments on its own command line unless the
+    # variable is in env_keep: "sudo -u user VAR=val cmd" fails with "you are not
+    # allowed to set the following environment variables". Routing the assignment
+    # through env makes it an argument to env rather than a sudo-level override,
+    # which is the difference between exit 1 and a clean run.
+    #
+    # Both calls are deliberately non-fatal. Under set -e a rejected systemctl call
+    # aborted the entire update at the second-to-last step, so the timer was never
+    # enabled and the completion banner never printed - the update looked broken
+    # when only the arming had failed. An installed-but-unarmed timer must be
+    # visible, not fatal.
+    if ! execute_command "sudo -u \"$TARGET_USER\" env XDG_RUNTIME_DIR=\"/run/user/$SECRET_UID\" systemctl --user daemon-reload" "Reload user systemd units"; then
+        echo -e "${YELLOW}WARNING: could not reload the user systemd manager for $TARGET_USER.${NC}"
+    fi
     # Enable the TIMER. Enabling the oneshot service alone installs a unit that never fires,
     # which is the "looks installed, does nothing" failure this gate exists to prevent.
-    execute_command "sudo -u \"$TARGET_USER\" XDG_RUNTIME_DIR=\"/run/user/$SECRET_UID\" systemctl --user enable --now bare-untracked-secret-scan.timer" "Enable the daily untracked-secret scan timer"
+    if ! execute_command "sudo -u \"$TARGET_USER\" env XDG_RUNTIME_DIR=\"/run/user/$SECRET_UID\" systemctl --user enable --now bare-untracked-secret-scan.timer" "Enable the daily untracked-secret scan timer"; then
+        echo -e "${YELLOW}WARNING: the daily untracked-secret scan timer is NOT enabled.${NC}"
+        echo -e "${YELLOW}         Arm it manually as $TARGET_USER: XDG_RUNTIME_DIR=/run/user/$SECRET_UID systemctl --user enable --now bare-untracked-secret-scan.timer${NC}"
+    fi
 else
     echo -e "${YELLOW}SKIP: untracked-secret scan artefacts not found under $REPO_DIR - gate not installed.${NC}"
 fi
