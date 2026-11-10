@@ -958,6 +958,91 @@ fi
 #####################################################
 #####################################################
 
+# --- 2b. CLI REPOSITORY REFRESH (always runs, fast mode included) ---
+#
+# WHY THIS EXISTS: the CLI clone/pull/rebuild lives inside section 2, which is
+# guarded by [ "$FAST_UPDATE" = false ]. bare-update and bare-update-pro both pass
+# --fast, so neither ever pulled ~/bare-ai-cli. A fix committed to bare-ai-cli
+# therefore could not reach a node through the documented update path at all -
+# the node kept running whatever it cloned at install time, and the launcher
+# executes sovereign.js from that clone.
+#
+# This section always runs. It fetches every CLI-shaped clone it finds, and
+# rebuilds only when the checked-out commit actually moved, so a no-op update
+# still finishes in seconds.
+
+refresh_cli_clone() {
+    local dir="$1"
+    local label="$2"
+
+    if [ ! -d "$dir/.git" ]; then
+        return 0
+    fi
+
+    local before after
+    before=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo "")
+
+    # Never abort the update on a fetch/pull problem: report it and carry on. The
+    # caller can re-run, and a stale clone is better than a half-finished update.
+    # --ff-only on purpose: this must never create a merge commit on a node, and
+    # it must never stash away work the agent left behind.
+    if ! git -C "$dir" fetch --quiet origin main 2>/dev/null; then
+        echo -e "${YELLOW}WARNING: could not fetch origin for $label at $dir - leaving it as it is.${NC}"
+        return 0
+    fi
+    if ! git -C "$dir" pull --ff-only --quiet origin main 2>/dev/null; then
+        echo -e "${YELLOW}WARNING: $label at $dir is not fast-forwardable (local commits or conflicts).${NC}"
+        echo -e "${YELLOW}         Left untouched. Resolve it there if this node needs the update.${NC}"
+        return 0
+    fi
+
+    after=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo "")
+    if [ -z "$after" ]; then
+        echo -e "${YELLOW}WARNING: could not read HEAD for $label at $dir.${NC}"
+        return 0
+    fi
+
+    if [ "$before" = "$after" ]; then
+        echo -e "${GREEN}OK: $label already at ${after:0:9} - nothing to rebuild.${NC}"
+        return 0
+    fi
+
+    echo -e "${GREEN}$label moved ${before:0:9} -> ${after:0:9}. Rebuilding.${NC}"
+
+    if [ ! -f "$dir/package.json" ]; then
+        echo -e "${YELLOW}WARNING: $label has no package.json - pulled but not rebuilt.${NC}"
+        return 0
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        echo -e "${YELLOW}WARNING: npm not found - $label pulled to ${after:0:9} but NOT rebuilt.${NC}"
+        echo -e "${YELLOW}         The launcher runs the prebuilt bundle, so it still runs the old code.${NC}"
+        return 0
+    fi
+
+    # Same command the full-mode build uses, so fast and full agree on the artefact.
+    if ! ( cd "$dir" && /usr/bin/env npm install --ignore-scripts --silent && \
+           NODE_OPTIONS="--max-old-space-size=8192" npm run build && npm run bundle ); then
+        echo -e "${RED}ERROR: $label pulled to ${after:0:9} but the rebuild FAILED.${NC}"
+        echo -e "${RED}       The launcher still runs the previous bundle. Re-run in $dir to see why.${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}OK: $label rebuilt at ${after:0:9}.${NC}"
+    return 0
+}
+
+echo -e "${GREEN}Refreshing CLI clone(s)...${NC}"
+CLI_REFRESH_FAILED=0
+for cli_dir in "$TARGET_HOME/bare-ai-cli" "$TARGET_HOME/bare-ai-cli-work" "$TARGET_HOME/bare-ai-pro"; do
+    if [ -d "$cli_dir/.git" ]; then
+        if ! refresh_cli_clone "$cli_dir" "$(basename "$cli_dir")"; then
+            CLI_REFRESH_FAILED=1
+        fi
+    fi
+done
+if [ "$CLI_REFRESH_FAILED" -eq 1 ]; then
+    echo -e "${RED}A CLI clone was pulled but failed to rebuild - see above.${NC}"
+fi
+
 # --- 3. BARE-NECESSITIES TOOLKIT DEPLOYMENT ---
 # CLI_SCRIPTS_DIR (official, installer-managed toolkit) lives inside
 # bare-necessities-workspace/ — see "AGENT WORKSPACE" definitions near the top.
