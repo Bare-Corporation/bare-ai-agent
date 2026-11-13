@@ -142,6 +142,47 @@ execute_command() {
     echo -e "${GREEN}✓ Done${NC}"
 }
 
+# Enable systemd user lingering WITHOUT letting it decide whether the install
+# succeeded.
+#
+# Linger lets a user's timers and services keep running while they are not logged
+# in. It is an enhancement, not a prerequisite: without it the daily
+# untracked-secret scan still runs whenever the user has a session.
+#
+# It must never be fatal. On a passwordless / non-interactive run sudo cannot
+# prompt, so demanding success here aborted the whole install at the
+# second-to-last step and suppressed the completion banner - the same class of
+# defect as the XDG_RUNTIME_DIR abort fixed in 94879a0. Three outcomes, all
+# non-fatal: already on, cannot prompt, or the command itself failed.
+ensure_linger() {
+    local tuser="$1"
+    local context="$2"
+    local now=""
+    if ! command -v loginctl >/dev/null 2>&1; then
+        return 0
+    fi
+    # Read the current state without sudo: it is readable for the user
+    # themselves, and it turns the common re-run case into a no-op instead of a
+    # prompt.
+    now=$(loginctl show-user "$tuser" -p Linger --value 2>/dev/null || true)
+    if [ "$now" = "yes" ]; then
+        echo -e "${GREEN}OK: user lingering already enabled for $tuser${NC}"
+        return 0
+    fi
+    # sudo -n fails fast instead of blocking on a password prompt that a headless
+    # run can never answer.
+    if ! sudo -n true >/dev/null 2>&1; then
+        echo -e "${YELLOW}WARNING: sudo needs a password here, so user lingering was NOT enabled ($context).${NC}"
+        echo -e "${YELLOW}         Timers and user services will only run while $tuser is logged in.${NC}"
+        echo -e "${YELLOW}         Enable it once by hand: sudo loginctl enable-linger $tuser${NC}"
+        return 0
+    fi
+    if ! execute_command "sudo loginctl enable-linger $tuser" "Enable user lingering for $tuser ($context)"; then
+        echo -e "${YELLOW}WARNING: loginctl enable-linger failed; continuing without lingering ($context).${NC}"
+    fi
+    return 0
+}
+
 # --- HELPER: system_step ---
 # Runs a step that needs root, unless this is a --fast user-space update.
 # Fast mode must never call sudo, so the step is reported and skipped rather
@@ -809,9 +850,7 @@ RestartSec=5
 WantedBy=default.target
 EOF
         # Enable lingering so the user session (and this service) survives reboots
-        if command -v loginctl >/dev/null 2>&1; then
-            execute_command "sudo loginctl enable-linger "$TARGET_USER"" "Enable user lingering for $TARGET_USER"
-        fi
+        ensure_linger "$TARGET_USER" "user unit"
         # Reload + enable + start the user unit in the target user's session
         USER_UID="$(id -u "$TARGET_USER" 2>/dev/null || echo 1000)"
         execute_command "sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" systemctl --user daemon-reload && sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" systemctl --user enable --now llama-server" "Enable and start llama-server user service"
@@ -1716,9 +1755,8 @@ if [ -f "$SECRET_SCAN_SH" ] && [ -f "$SECRET_UNIT_SRC/bare-untracked-secret-scan
         echo -e "${RED}WARNING: gitleaks is not on PATH - the untracked-secret scan will exit 2 (tooling) on every run.${NC}"
         echo -e "${YELLOW}         Install gitleaks into $TARGET_HOME/.local/bin to activate the gate.${NC}"
     fi
-    if command -v loginctl >/dev/null 2>&1; then
-        execute_command "sudo loginctl enable-linger \"$TARGET_USER\"" "Enable user lingering for the secret-scan timer"
-    fi
+    ensure_linger "$TARGET_USER" "secret-scan timer"
+
     # Resolve the uid through a file: no command substitution, so this stays readable
     # and cannot be mangled by shell quoting in either direction.
     SECRET_UID_TMP="/tmp/bare-ai-secret-scan-uid.$$"
