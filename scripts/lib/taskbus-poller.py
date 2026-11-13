@@ -186,6 +186,49 @@ def is_local_node(node):
 
 LEASE_MINUTES = 90          # scope section 4 proposal: 1.5x longest observed job
 DEFAULT_MAX_ATTEMPTS = 2    # scope section 4 proposal; row max_attempts wins if set
+
+# ---- WATCHDOG (row 597) ------------------------------------------------------
+# A continuous credential-exchange failure used to leave a node SILENTLY inert:
+# the process stayed up, the unit reported active, claims stayed at 0, and only
+# the journal knew. Counting consecutive REFRESH PREFLIGHT failures in-process
+# and exiting at a threshold turns that into a restart: a fresh process re-reads
+# the AppRole and the machine secret from Vault, which is the only thing that
+# clears a dead cached parent key - _exchange() never re-reads _AGENT_KEY_CACHE.
+#
+# The threshold exists so one transient 500 or network blip cannot start a
+# restart loop. Override with POLLER_WATCHDOG_THRESHOLD.
+WATCHDOG_THRESHOLD_DEFAULT = 3
+WATCHDOG_EXIT_CODE = 75          # EX_TEMPFAIL: temporary, restart is the remedy
+ALERT_LOG = os.path.join(os.path.expanduser("~"), ".bare-ai", "logs",
+                        "poller-alerts.log")
+
+
+def watchdog_threshold():
+    """Consecutive-failure threshold. Non-positive or junk falls back to 3."""
+    raw = os.environ.get("POLLER_WATCHDOG_THRESHOLD", "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return WATCHDOG_THRESHOLD_DEFAULT
+
+
+def write_watchdog_alert(reason, cycles, threshold):
+    """Append ONE greppable line to the monitoring path.
+
+    Deliberately never writes key material: reason is an exception string from
+    the exchange, which carries the HTTP status and the server's error word, not
+    the credential. Any OSError is swallowed - an unwritable alert log must not
+    be the thing that breaks the poller.
+    """
+    try:
+        os.makedirs(os.path.dirname(ALERT_LOG), exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(ALERT_LOG, "a", encoding="utf-8") as fh:
+            fh.write("%s WATCHDOG credential exchange failed %d consecutive " 
+                     "cycles (threshold %d): %s" % (stamp, cycles, threshold,
+                                                      str(reason)[:200]))
+            fh.write(chr(10))
+    except OSError:
+        pass
 MAX_PER_CYCLE = 1           # cost cap: a status typo must not cause unbounded spend
 # Daily cap, raised 6 -> 24 on liege approval 2026-09-13. Rationale: at ~9k prompt
 # tokens and off-peak rates this is roughly $0.04/DAY, so cost is not the real limit -
@@ -3143,11 +3186,28 @@ class Poller:
         if CLIENT_REFRESH_ENABLED:
             try:
                 self._refresh_preflight()
+                # Any successful preflight clears the streak: the watchdog must
+                # measure CONSECUTIVE failures, not a lifetime tally.
+                self._refresh_failures = 0
             except EphemeralCredentialError as exc:
                 log("REFRESH PREFLIGHT FAILED - refusing to act this cycle: %s"
                     % exc, "ERROR")
                 self.record("refresh-failed", 0, str(exc)[:200])
                 summary["refresh_failed"] = True
+                # WATCHDOG (row 597). Fail closed for THIS cycle either way; the
+                # difference is whether we keep sitting here doing it forever.
+                self._refresh_failures = getattr(self, "_refresh_failures", 0) + 1
+                _threshold = watchdog_threshold()
+                summary["refresh_failures"] = self._refresh_failures
+                if self._refresh_failures >= _threshold:
+                    self.heartbeat(summary)
+                    write_watchdog_alert(exc, self._refresh_failures, _threshold)
+                    log("WATCHDOG: credential exchange has failed %d consecutive "
+                        "cycles (threshold %d) - exiting %d so the supervisor "
+                        "restarts a process that re-reads Vault"
+                        % (self._refresh_failures, _threshold,
+                           WATCHDOG_EXIT_CODE), "ERROR")
+                    raise SystemExit(WATCHDOG_EXIT_CODE)
                 return self.heartbeat(summary)
 
         rows = self.bus.all_rows()
