@@ -1173,6 +1173,7 @@ LIB_SRC="$REPO_DIR/scripts/lib"
 LIB_DEST="$BARE_AI_DIR/lib"
 if [ -d "$LIB_SRC" ]; then
     mkdir -p "$LIB_DEST"
+    # REQUIRED artefacts: without these the runner cannot start at all.
     for _libf in taskbus-agent-job.py dispatch-job.sh; do
         if [ -f "$LIB_SRC/$_libf" ]; then
             cp "$LIB_SRC/$_libf" "$LIB_DEST/$_libf"
@@ -1183,7 +1184,38 @@ if [ -d "$LIB_SRC" ]; then
             exit 1
         fi
     done
-    echo -e "${GREEN}✓ task-bus lib deployed${NC}"
+    # SIBLING MODULES the runner imports. This list used to be hardcoded to the
+    # two files above, which silently omitted profile_context.py: every runner
+    # then failed its execution-profile verification with exit 78 and the fleet
+    # deadlocked, while the installer reported success. Stage every sibling .py
+    # instead of naming them, so adding an import to the runner cannot leave the
+    # deployment incomplete. test_*.py are excluded: they are not runtime code.
+    _sib_count=0
+    for _sib in "$LIB_SRC"/*.py; do
+        [ -f "$_sib" ] || continue
+        _sib_base=$(basename "$_sib")
+        case "$_sib_base" in
+            test_*) continue ;;
+            taskbus-agent-job.py|dispatch-job.sh) continue ;;
+        esac
+        cp "$_sib" "$LIB_DEST/$_sib_base"
+        chmod 644 "$LIB_DEST/$_sib_base"
+        _sib_count=$((_sib_count + 1))
+        echo -e "${GREEN}  - $_sib_base installed (sibling module)${NC}"
+    done
+    echo -e "${GREEN}  - $_sib_count sibling module(s) staged${NC}"
+    # POST-STAGE ASSERTION. A missing or unimportable verifier must stop the
+    # install LOUDLY here, not silently at claim time on a remote node. Import the
+    # module the way the runner does - by name, from the deployed directory - so a
+    # broken import chain fails in the same way it will at runtime.
+    if ! ( cd "$LIB_DEST" && python3 -c "import profile_context" ) 2>/dev/null; then
+        echo -e "${RED}❌ FATAL: profile_context.py is not importable from $LIB_DEST${NC}"
+        echo -e "${RED}   The task-bus runner verifies every execution profile with this module."${NC}
+        echo -e "${RED}   Without it every dispatched job exits 78 and the fleet deadlocks.${NC}"
+        ls -l "$LIB_DEST"/profile_context.py 2>/dev/null || echo -e "${RED}   file is ABSENT${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ task-bus lib deployed (verifier importable)${NC}"
 else
     echo -e "${RED}❌ Error: scripts/lib not found at $LIB_SRC${NC}"
     exit 1
