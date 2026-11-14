@@ -30,6 +30,7 @@ so every row this poller touches is attributable to the poller and not to a huma
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -201,6 +202,26 @@ WATCHDOG_THRESHOLD_DEFAULT = 3
 WATCHDOG_EXIT_CODE = 75          # EX_TEMPFAIL: temporary, restart is the remedy
 ALERT_LOG = os.path.join(os.path.expanduser("~"), ".bare-ai", "logs",
                         "poller-alerts.log")
+
+
+def source_fingerprint(path=None):
+    """(mtime, sha256 prefix) of the poller source THIS process loaded.
+
+    A Python process never re-reads its own source, so after a pull the file on
+    disk and the code in memory can disagree for days - which is exactly what
+    happened on 2026-11-13, when a credential watchdog landed 3.5 hours into a
+    process that then logged nothing a reader could use to tell. Logging the
+    fingerprint at startup turns "is this node running the fix?" into a grep.
+    """
+    src = path or os.path.abspath(__file__)
+    try:
+        with open(src, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+        stamp = datetime.fromtimestamp(os.path.getmtime(src),
+                                     timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return stamp, digest
+    except OSError as exc:
+        return "unknown", "unreadable:%s" % type(exc).__name__
 
 
 def watchdog_threshold():
@@ -3566,6 +3587,9 @@ def main():
     poller = Poller(bus, live=args.live)
     mode = "LIVE" if args.live else "DRY-RUN"
     log("taskbus-poller starting in %s mode (once=%s)" % (mode, args.once))
+    _mtime, _digest = source_fingerprint()
+    log("code: taskbus-poller.py mtime=%s sha256=%s - a pull does NOT reload "
+        "this process; restart the unit to run new code" % (_mtime, _digest))
 
     if args.once:
         res = poller.cycle()
