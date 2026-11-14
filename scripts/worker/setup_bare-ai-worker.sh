@@ -1796,6 +1796,55 @@ fi
 #####################################################
 
 
+# --- 9. TASK-BUS POLLER SOURCE REFRESH ---
+# A Python daemon never re-reads its own source, so a pull that changes
+# scripts/lib/taskbus-poller.py leaves the running unit on old bytecode until
+# somebody restarts it. That is exactly how the row-597 credential watchdog sat
+# on disk for 3.5 hours without ever executing (ticket 606). Compare the source
+# this run now has against the fingerprint recorded at the end of the previous
+# run, and restart the unit only when it actually moved.
+POLLER_SRC="$TARGET_HOME/bare-ai-agent/scripts/lib/taskbus-poller.py"
+POLLER_STATE_DIR="$TARGET_HOME/.bare-ai/state"
+POLLER_STAMP="$POLLER_STATE_DIR/poller-source.sha256"
+POLLER_UNIT="bare-taskbus-poller.service"
+if [ -f "$POLLER_SRC" ]; then
+    POLLER_SHA=$(sha256sum "$POLLER_SRC" | cut -d' ' -f1)
+    POLLER_PREV=""
+    if [ -f "$POLLER_STAMP" ]; then
+        POLLER_PREV=$(cat "$POLLER_STAMP")
+    fi
+    mkdir -p "$POLLER_STATE_DIR"
+    if [ "$POLLER_SHA" = "$POLLER_PREV" ]; then
+        echo -e "${GREEN}OK: taskbus-poller source unchanged - no restart needed${NC}"
+    else
+        echo -e "${YELLOW}taskbus-poller source changed (${POLLER_PREV:0:12} -> ${POLLER_SHA:0:12}) - the running unit holds the OLD code${NC}"
+        TARGET_UID=$(id -u "$TARGET_USER")
+        if [ "$(id -un)" = "$TARGET_USER" ]; then
+            POLLER_STATE=$(systemctl --user is-active "$POLLER_UNIT" 2>/dev/null || true)
+        else
+            POLLER_STATE=$(sudo -u "$TARGET_USER" env "XDG_RUNTIME_DIR=/run/user/$TARGET_UID" systemctl --user is-active "$POLLER_UNIT" 2>/dev/null || true)
+        fi
+        if [ "$POLLER_STATE" = "active" ]; then
+            POLLER_RESTART_OK=false
+            if [ "$(id -un)" = "$TARGET_USER" ]; then
+                if systemctl --user restart "$POLLER_UNIT"; then POLLER_RESTART_OK=true; fi
+            else
+                if sudo -u "$TARGET_USER" env "XDG_RUNTIME_DIR=/run/user/$TARGET_UID" systemctl --user restart "$POLLER_UNIT"; then POLLER_RESTART_OK=true; fi
+            fi
+            if [ "$POLLER_RESTART_OK" = true ]; then
+                echo -e "${GREEN}OK: $POLLER_UNIT restarted onto the new source${NC}"
+            else
+                echo -e "${RED}WARNING: could not restart $POLLER_UNIT - it is still running the OLD source. Restart it by hand.${NC}"
+            fi
+        else
+            echo -e "${YELLOW}$POLLER_UNIT is not active (state=${POLLER_STATE:-unknown}) - nothing to reload${NC}"
+        fi
+        echo "$POLLER_SHA" > "$POLLER_STAMP"
+    fi
+else
+    echo -e "${YELLOW}WARNING: no poller source at $POLLER_SRC - skipping the poller reload step${NC}"
+fi
+
 # Set up 1-minute thermal heartbeat
 echo "Setting up thermal monitoring heartbeat..."
 if command -v crontab &>/dev/null; then
