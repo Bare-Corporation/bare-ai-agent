@@ -383,6 +383,152 @@ def next_offpeak(when, windows, limit_min=8 * 24 * 60):
         cur = cur + timedelta(minutes=1)
     return None
 
+# ---------------------------------------------------------------- scheduling policy
+# Ticket 588: the avoid window is POLICY, not a clock constant. It comes from the
+# task's execution profile (table 234 carries avoid_windows + timezone) and that
+# profile is stamped into the row's profile_snapshot, so the decision stays
+# self-contained - nothing is fetched from the API at claim time.
+SCHEDULE_GLOBAL_TZ = "UTC"
+
+
+def _window_minutes(value):
+    """Minutes since local midnight, from 540, 540.0 or "09:00". None if unusable."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 <= value <= 1440 else None
+    if isinstance(value, float):
+        mins = int(value)
+        return mins if 0 <= mins <= 1440 else None
+    if isinstance(value, str) and ":" in value:
+        parts = value.strip().split(":")
+        if len(parts) == 2 and parts[0].strip().isdigit() and parts[1].strip().isdigit():
+            mins = int(parts[0]) * 60 + int(parts[1])
+            return mins if 0 <= mins <= 1440 else None
+    return None
+
+
+def parse_schedule_windows(raw):
+    """Normalise a profile's avoid_windows into [(days, start_min, end_min)].
+
+    Accepted shape (JSON text or already parsed): one window, or a list of them,
+    each as [days, start, end]. days are weekday numbers (0=Mon) or names; start
+    and end are minutes since LOCAL midnight or "HH:MM". Returns
+    (windows, status) with status ok | none | malformed.
+
+    none means "no policy set" and must behave like the old global default.
+    malformed means "a policy exists and cannot be read" - that FAILS CLOSED
+    upstream rather than quietly running all day, the same rule the rate-rule
+    parser already applies.
+    """
+    if raw is None or raw == "" or raw == []:
+        return [], "none"
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return [], "malformed"
+    if isinstance(data, dict):
+        data = data.get("windows") or data.get("avoid_windows") or []
+    if not isinstance(data, list) or not data:
+        return [], "malformed"
+    entries = data if any(isinstance(x, (list, tuple)) for x in data) else [data]
+    wins = []
+    for entry in entries:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 3:
+            return [], "malformed"
+        days_raw, start_raw, end_raw = entry
+        if isinstance(days_raw, (int, str)):
+            days_raw = [days_raw]
+        if not isinstance(days_raw, (list, tuple)):
+            return [], "malformed"
+        days = []
+        for day in days_raw:
+            if isinstance(day, str) and day.strip().lower()[:3] in _DAYS:
+                days.append(_DAYS[day.strip().lower()[:3]])
+            elif isinstance(day, int) and 0 <= day <= 6:
+                days.append(day)
+            else:
+                return [], "malformed"
+        start = _window_minutes(start_raw)
+        end = _window_minutes(end_raw)
+        if not days or start is None or end is None or start == end:
+            return [], "malformed"
+        wins.append((days, start, end))
+    return (wins, "ok") if wins else ([], "malformed")
+
+
+def _snapshot_schedule_fields(row):
+    """Pull avoid_windows/timezone out of a row's profile snapshot.
+
+    The snapshot shape belongs to whoever stamps it and has already changed once
+    (config_version was added to execution_config), so read the keys wherever they
+    sit - top level, execution_config, or profile - instead of assuming one nest.
+    First hit wins; absent stays absent.
+    """
+    raw = row.get("profile_snapshot")
+    if not raw:
+        return None, None
+    try:
+        snap = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None, None
+    if not isinstance(snap, dict):
+        return None, None
+    blocks = [snap]
+    for key in ("execution_config", "profile"):
+        if isinstance(snap.get(key), dict):
+            blocks.append(snap[key])
+    windows = None
+    tz_name = None
+    for block in blocks:
+        if windows is None and block.get("avoid_windows"):
+            windows = block.get("avoid_windows")
+        if tz_name is None and block.get("timezone"):
+            tz_name = block.get("timezone")
+    return windows, tz_name
+
+
+def resolve_schedule(row):
+    """(windows, tz_name, source) for this row's avoid window.
+
+    source is 'profile' when the row carries a readable profile window, 'global'
+    when it carries none - so a profile-less row behaves exactly as before this
+    shipped - and 'malformed' when it carries one we cannot parse.
+    """
+    raw_windows, raw_tz = _snapshot_schedule_fields(row)
+    wins, status = parse_schedule_windows(raw_windows)
+    if status == "ok":
+        return wins, (str(raw_tz).strip() if raw_tz else SCHEDULE_GLOBAL_TZ), "profile"
+    if status == "malformed":
+        return None, None, "malformed"
+    return GLOBAL_AVOID_WINDOWS, SCHEDULE_GLOBAL_TZ, "global"
+
+
+def window_clock(now, tz_name):
+    """`now` re-expressed so weekday()/hour/minute read LOCAL time in tz_name.
+
+    in_peak and next_offpeak only read those three fields, so converting the
+    instant is what makes the decision DST-correct. An unknown zone falls back to
+    UTC and says so - a typo in a profile must not wedge the poller.
+    """
+    if not tz_name or tz_name == "UTC":
+        return now, "UTC"
+    try:
+        from zoneinfo import ZoneInfo
+        return now.astimezone(ZoneInfo(str(tz_name))), str(tz_name)
+    except Exception:
+        return now, "UTC(unknown tz %r)" % (tz_name,)
+
+
+def format_windows(windows):
+    """Compact render for a log line: '01234 09:00-17:00' per window."""
+    parts = []
+    for days, start, end in windows:
+        parts.append("%s %02d:%02d-%02d:%02d"
+                     % ("".join(str(d) for d in sorted(days)),
+                        start // 60, start % 60, end // 60, end % 60))
+    return ",".join(parts) if parts else "none"
+
 # The executor: what actually RUNS a claimed task. Set EXECUTOR=<path> in
 # ~/.bare-ai/taskbus-exec.conf (one line). It is invoked as <executor> <row_id>
 # through dispatch-job.sh, so it runs detached and its output is secret-scrubbed.
@@ -2264,7 +2410,8 @@ def stale_sweep(rows, now=None, stale_days=None):
 
 # -------------------------------------------------------------------- the poller
 
-def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None):
+def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None,
+                        tz_name=None, schedule_source=None):
     """PURE: may this row be claimed at `now`? start_task_at plus peak pricing.
 
     Returns (ok, kind, detail). ok=False means DO NOT claim, with a reason.
@@ -2280,7 +2427,16 @@ def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None):
     is shadowed by the stale copy and the row is suppressed until the next cycle.
     """
     policy = activity_policy if activity_policy is not None else ACTIVITY_POLICY
+    if schedule_source == "malformed":
+        # A window exists and cannot be read. Treating that as "no window" is how
+        # a policy silently stops applying, so this fails closed instead.
+        return False, "schedule-malformed", (
+            "profile avoid_windows could not be parsed - refusing to guess a window")
     windows = avoid_windows if avoid_windows is not None else GLOBAL_AVOID_WINDOWS
+    local_now, tz_label = window_clock(now, tz_name)
+    source = schedule_source or ("profile" if avoid_windows is not None else "global")
+    window_label = "window=%s tz=%s source=%s" % (format_windows(windows),
+                                                    tz_label, source)
     due = parse_baserow_ts(row.get("start_task_at"))
     if due and now < due:
         return False, "not-yet-due", "start_task_at=%s" % due.strftime("%Y-%m-%dT%H:%MZ")
@@ -2290,7 +2446,8 @@ def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None):
     # window and runs regardless of the hour. Cost protection is unchanged for
     # every other priority (medium/low/blank still wait for off-peak).
     if str(fval(row, "priority") or "").strip().lower() == "high":
-        return True, "ok", "priority=high bypasses the global avoid window"
+        return True, "ok", ("priority=high bypasses the avoid window (%s)"
+                             % window_label)
     # FAIL CLOSED ON A MALFORMED RATE RULE (row 76, carried from the dispatcher).
     # A row whose rule carries a time clause we cannot parse is not "no peak": we cannot
     # tell what it means, and starting now could pay peak rates on every such row. High
@@ -2301,13 +2458,14 @@ def schedule_verdict_at(row, now, activity_policy=None, avoid_windows=None):
     # GLOBAL window governs the hour. A well-formed row rule is reported but does not narrow
     # it; a malformed one has already been refused above, which is the only case in which
     # the row's own rule can decide anything.
-    if in_peak(now, windows):
-        nxt = next_offpeak(now, windows)
-        return False, "peak-defer", ("inside the global avoid window (00:00-14:00 UTC); "
-                                     "next runnable %s"
-                                     % (nxt.strftime("%Y-%m-%dT%H:%MZ") if nxt else "?"))
+    if in_peak(local_now, windows):
+        nxt = next_offpeak(local_now, windows)
+        return False, "peak-defer", ("inside the avoid window (%s); next runnable %s"
+                                     % (window_label,
+                                        nxt.strftime("%Y-%m-%dT%H:%M%z") if nxt else "?"))
     wins, _status = parse_peak_windows(row.get("special_ai_agent_calculation_rule"))
-    return True, "ok", ("runnable; row rule parsed windows=%d" % len(wins))
+    return True, "ok", ("runnable; row rule parsed windows=%d (%s)"
+                        % (len(wins), window_label))
 
 
 class Poller:
@@ -2642,8 +2800,9 @@ class Poller:
         ticket 76: the body moved to schedule_verdict_at() so it is unit-testable
         and so a release clearing start_task_at is honoured on the fresh re-read.
         """
+        windows, tz_name, source = resolve_schedule(row)
         return schedule_verdict_at(row, now or now_utc(), ACTIVITY_POLICY,
-                                   GLOBAL_AVOID_WINDOWS)
+                                   windows, tz_name, source)
 
     # ---- terminal jobs: report the outcome (scope section 6)
     def report_outcome(self, row, state, target=None):
@@ -2957,6 +3116,11 @@ class Poller:
                 log("row %s: %s (%s) - not claiming" % (rid, vkind, vdetail))
                 self.record(vkind, rid, vdetail)
                 continue
+            if "bypasses" in vdetail:
+                # ticket 588: a row that runs INSIDE its avoid window is the
+                # one decision nobody can reconstruct later, so say it out loud.
+                log("row %s: ok (%s)" % (rid, vdetail))
+                self.record("schedule-bypass", rid, vdetail)
             if not (fresh.get("ai_prompt") or "").strip():
                 log("row %s has no ai_prompt - refusing to act on an unread/empty task" % rid)
                 self.record("claim-empty", rid, "ai_prompt empty")
