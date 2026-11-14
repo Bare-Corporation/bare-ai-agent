@@ -1382,6 +1382,18 @@ if grep -qF "# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:" "$BASHRC_FILE"
     fi
 fi
 
+# The block below starts with a blank separator line. Deletion removes the block
+# but leaves that separator behind, so without this step every install adds one
+# more blank line to the file: small drift, but drift, and the whole point of this
+# section is that a second run changes nothing. Trim trailing blank lines first so
+# exactly one separator remains, however many times this installer has run.
+if [ "$BARE_BASHRC_BLOCK_FOUND" = true ] && [ -s "$BASHRC_FILE" ]; then
+    BARE_TRIM_TMP="$BASHRC_FILE.bareai-trim.$$"
+    awk '{ all[NR] = $0 } END { last = NR; while (last > 0 && all[last] == "") last--; for (i = 1; i <= last; i++) print all[i] }' "$BASHRC_FILE" > "$BARE_TRIM_TMP"
+    cat "$BARE_TRIM_TMP" > "$BASHRC_FILE"
+    rm -f "$BARE_TRIM_TMP"
+fi
+
 cat << 'PATH_EOF' >> "$BASHRC_FILE"
 
 # START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
@@ -1679,23 +1691,104 @@ else
     echo -e "${GREEN}OK: bare() launcher installed in $BASHRC_FILE${NC}"
 fi
 
-# [IDENTITY-CHAIN-20261027] A second bare() definition silently wins, because bash
-# uses the LAST definition it reads. A node was found with two definitions, so the
-# launcher actually in force was not the one this installer had written. This
-# installer only owns the delimited block, so a stray definition OUTSIDE that block
-# is reported here, never deleted - rewriting a user's file beyond the managed
-# region is not this script's business.
-BARE_DEF_COUNT=$(grep -c '^[[:space:]]*bare()' "$BASHRC_FILE" 2>/dev/null || true)
-case "$BARE_DEF_COUNT" in
-    ''|*[!0-9]*) BARE_DEF_COUNT=0 ;;
+# [BASHRC-IDEMPOTENT-20261114] One definition per name, or this run FAILS.
+#
+# The block above is replaced in place, so repeated installs cannot stack it up.
+# What that replacement cannot see is a copy of the same definition OUTSIDE the
+# markers - typically the bare-update-pro alias an older installer appended before
+# the block existed. Two definitions are silent: bash uses the LAST one it reads,
+# so the command actually in force may not be the one this installer wrote, and
+# nothing warns. Counting them is the only way to notice, which is what this does.
+#
+# STRAY POLICY, deliberately narrow:
+#   * A line outside the markers is removed ONLY when it is byte-identical to an
+#     alias line this installer just wrote inside the markers. That text is the
+#     installer's own, not the user's, so removing it cannot destroy user content.
+#   * Anything else (an edited alias, a stray function body, a retired alias) is
+#     REPORTED and makes the run exit non-zero. This script does not rewrite a
+#     user's file beyond its managed region to "fix" something it did not write.
+BARE_MARK_START='# START: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:'
+BARE_MARK_END='# END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:'
+BARE_DEDUP_TMP="$BASHRC_FILE.bareai-dedup.$$"
+
+BARE_STRAY_REMOVED=$(awk -v s="$BARE_MARK_START" -v e="$BARE_MARK_END" -v out="$BARE_DEDUP_TMP" '
+    NR == FNR {
+        if ($0 == s) { inside = 1; next }
+        if ($0 == e) { inside = 0; next }
+        if (inside && index($0, "alias bare-") == 1) { managed[$0] = 1 }
+        next
+    }
+    FNR == 1 { inside2 = 0 }
+    {
+        if ($0 == s) { inside2 = 1; print > out; next }
+        if ($0 == e) { inside2 = 0; print > out; next }
+        if (!inside2 && ($0 in managed)) { removed++; next }
+        print > out
+    }
+    END { close(out); printf "%d", removed + 0 }
+' "$BASHRC_FILE" "$BASHRC_FILE")
+
+case "$BARE_STRAY_REMOVED" in
+    ''|*[!0-9]*) BARE_STRAY_REMOVED=0 ;;
 esac
-if [ "$BARE_DEF_COUNT" -gt 1 ]; then
-    echo -e "${RED}WARNING: $BASHRC_FILE defines bare() $BARE_DEF_COUNT times - the LAST one wins.${NC}"
-    echo -e "${YELLOW}         Definition lines: $(grep -n '^[[:space:]]*bare()' "$BASHRC_FILE" | cut -d: -f1 | tr '\n' ' ')${NC}"
-    echo -e "${YELLOW}         Only the region between the BARE-AI-AGENT markers is managed here.${NC}"
-    echo -e "${YELLOW}         Back the file up, then remove the stray definition(s) by hand.${NC}"
-else
-    echo -e "${GREEN}OK: exactly one bare() definition in $BASHRC_FILE${NC}"
+if [ "$BARE_STRAY_REMOVED" -gt 0 ]; then
+    if grep -qF "$BARE_MARK_START" "$BARE_DEDUP_TMP" && grep -qF "$BARE_MARK_END" "$BARE_DEDUP_TMP"; then
+        BARE_BASHRC_BACKUP="$BASHRC_FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -p "$BASHRC_FILE" "$BARE_BASHRC_BACKUP"
+        cat "$BARE_DEDUP_TMP" > "$BASHRC_FILE"
+        echo -e "${GREEN}OK: removed $BARE_STRAY_REMOVED stray BARE-AI alias line(s) from outside the managed block${NC}"
+        echo -e "${GREEN}    backup: $BARE_BASHRC_BACKUP${NC}"
+    else
+        rm -f "$BARE_DEDUP_TMP"
+        echo -e "${RED}FATAL: the stray sweep would have lost the managed block; $BASHRC_FILE left untouched.${NC}" >&2
+        exit 1
+    fi
+fi
+rm -f "$BARE_DEDUP_TMP"
+
+# Count a definition by its leading token, after stripping leading whitespace.
+# No regex escapes on purpose: a function line reads "name() {" and an alias line
+# reads "alias name=", so a prefix test is exact and cheap.
+bare_count_definition() {
+    awk -v n="$1" '
+        { line = $0
+          sub(/^[[:space:]]+/, "", line)
+          if (index(line, n) == 1) c++
+        }
+        END { print c + 0 }
+    ' "$BASHRC_FILE"
+}
+
+BARE_ASSERT_FAILED=0
+bare_assert_single() {
+    BARE_DEF_LABEL="$1"
+    BARE_DEF_COUNT=$(bare_count_definition "$2")
+    if [ "$BARE_DEF_COUNT" -eq 1 ]; then
+        echo -e "${GREEN}OK: exactly one $BARE_DEF_LABEL in $BASHRC_FILE${NC}"
+    else
+        echo -e "${RED}ERROR: $BASHRC_FILE defines $BARE_DEF_LABEL $BARE_DEF_COUNT times (expected exactly 1).${NC}"
+        echo -e "${YELLOW}       lines: $(grep -nF "$2" "$BASHRC_FILE" | cut -d: -f1 | paste -sd' ')${NC}"
+        BARE_ASSERT_FAILED=1
+    fi
+}
+
+# Every name the managed block is responsible for. bare-role is deliberately NOT
+# listed: the alias was retired on 2026-10-27 in favour of bare-env, so a surviving
+# bare-role is legacy user content, not a definition this installer must own.
+bare_assert_single "bare()" "bare()"
+bare_assert_single "bare-work()" "bare-work()"
+bare_assert_single "alias bare-env" "alias bare-env="
+bare_assert_single "alias bare-constitution" "alias bare-constitution="
+bare_assert_single "alias bare-uninstall" "alias bare-uninstall="
+bare_assert_single "alias bare-update" "alias bare-update="
+bare_assert_single "alias bare-update-pro" "alias bare-update-pro="
+
+if [ "$BARE_ASSERT_FAILED" -ne 0 ]; then
+    echo -e "${RED}FATAL: duplicate BARE-AI definitions remain in $BASHRC_FILE.${NC}" >&2
+    echo -e "${YELLOW}       Only the region between the BARE-AI-AGENT markers is managed here.${NC}" >&2
+    echo -e "${YELLOW}       Back the file up and remove the stray definition(s) by hand,${NC}" >&2
+    echo -e "${YELLOW}       then re-run this installer. Refusing to report success.${NC}" >&2
+    exit 1
 fi
 
 #####################################################
