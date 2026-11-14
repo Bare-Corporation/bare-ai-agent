@@ -540,6 +540,22 @@ def load_claim_snapshot():
     return ctx, None
 
 
+def claim_snapshot_env_source():
+    """Name the env var that supplies a claim snapshot, or None when none does.
+
+    The two gates read different variables: load_claim_snapshot() understands
+    TASKBUS_CLAIM_FILE and TASKBUS_CLAIM_JSON, while profile_gate() understands
+    TASKBUS_CLAIM_JSON and TASKBUS_CLAIM_PAYLOAD. A source understood by only one
+    of them is still a supplied snapshot, so this list must cover both, or the
+    caller reports the legacy path while the profile gate is about to run.
+    """
+    for _name in ("TASKBUS_CLAIM_JSON", "TASKBUS_CLAIM_FILE",
+                  "TASKBUS_CLAIM_PAYLOAD"):
+        if (os.environ.get(_name) or "").strip():
+            return _name
+    return None
+
+
 def apply_snapshot_router(ctx, env):
     """Export the snapshot routing config and enforce what is enforceable here."""
     cfg = (ctx or {}).get("router") or {}
@@ -744,7 +760,15 @@ def main():
             except OSError as _se:
                 print("target-job: audit stamp not written: %s" % _se)
     else:
-        print("target-job: no claim snapshot supplied - legacy path, no profile gate")
+        # A snapshot can arrive through a variable this gate does not read: the
+        # poller sets TASKBUS_CLAIM_PAYLOAD, which profile_gate() verifies below.
+        # Announcing the legacy path here was a false diagnostic that sent an
+        # operator hunting for a gate that does run.
+        _claim_source = claim_snapshot_env_source()
+        if _claim_source is None:
+            print("target-job: no claim snapshot supplied - legacy path, no profile gate")
+        else:
+            print("target-job: claim snapshot supplied via %s - the profile gate below verifies it" % _claim_source)
 
     # ---- PINNED WORKING DIRECTORY ----------------------------------------
     # Sessions are CWD-SCOPED. A fixed per-job directory is what makes --resume latest safe;
