@@ -58,8 +58,29 @@ def fetch_secret(addr, token, path):
     with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
         return json.load(resp)["data"]["data"]
 
+USAGE = """Usage:
+  {name} [--dry-run] [--deploy | --production] [--no-indexnow]
+{extra}
+A real Cloudflare deploy requires the explicit --deploy (or --production) flag.
+Bare invocation prints this help and exits 2 without touching production."""
+
+def require_explicit_deploy(argv):
+    """A deploy must be asked for by name. Anything else prints usage and exits 2.
+
+    This exists because a bare run of these scripts used to deploy to production;
+    a syntax smoke-test once launched a real deploy.
+    """
+    has_deploy = ("--deploy" in argv) or ("--production" in argv)
+    has_dry = "--dry-run" in argv
+    if has_dry or has_deploy:
+        return
+    print(USAGE.format(name=os.path.basename(argv[0]),
+                       extra='  (the CIC repo is fixed to ~/cloudintegrationcorporation-frontend)'))
+    raise SystemExit(2)
+
 
 def main():
+    require_explicit_deploy(sys.argv)
     token = os.environ.get("VAULT_TOKEN")
     if not token:
         raise SystemExit("VAULT_TOKEN not present in environment - refusing to deploy")
