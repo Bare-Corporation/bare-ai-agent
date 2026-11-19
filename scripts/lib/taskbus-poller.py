@@ -1061,6 +1061,98 @@ def client_credential_status():
         return False, str(exc)
 
 
+
+# ---------------------------------------------------- Stage 0 supervisor bridge
+# Flag-gated: with TASKBUS_SUPERVISOR unset every helper below is inert and the
+# legacy dispatch/close behaviour is unchanged. The bridge exists because the
+# runner subprocess needs three things the poller holds and it does not: the
+# claim nonce (to authenticate heartbeats), the row id (to name its state file)
+# and the agent key plus gateway base (to reach the heartbeat route).
+
+SUPERVISOR_RESULT_PREFIX = "SUPERVISOR_RESULT "
+TASKBUS_API_BASE = os.environ.get("TASKBUS_API_BASE", "").strip().rstrip("/")
+SUPERVISOR_TERMINAL_STATUSES = ("HumanReviewNeeded", "Blocked")
+
+
+def supervisor_enabled():
+    return (os.environ.get("TASKBUS_SUPERVISOR") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def supervisor_env_map(claim, row_id, api_key=None, api_base=None):
+    """Environment additions for the runner. Empty dict when the flag is off."""
+    if not supervisor_enabled():
+        return {}
+    out = {"TASKBUS_SUPERVISOR": "1"}
+    nonce = str((claim or {}).get("nonce") or "").strip()
+    if nonce:
+        out["TASKBUS_CLAIM_NONCE"] = nonce
+    if row_id not in (None, ""):
+        out["TASKBUS_ROW_ID"] = str(row_id)
+    key = str(api_key or "").strip()
+    if key:
+        out["TASKBUS_API_KEY"] = key
+    base = str(api_base or TASKBUS_API_BASE).strip().rstrip("/")
+    if base:
+        out["TASKBUS_API_BASE"] = base
+    return out
+
+
+def supervisor_env_prefix(env_map):
+    """Shell prefix for the remote dispatch. Empty string when the flag is off."""
+    if not env_map:
+        return ""
+    return " ".join("%s=%s" % (k, shlex.quote(str(v))) for k, v in sorted(env_map.items())) + " "
+
+
+def parse_supervisor_result(text):
+    """Return the SUPERVISOR_RESULT envelope from captured job output, or None."""
+    for line in (text or "").splitlines():
+        if line.startswith(SUPERVISOR_RESULT_PREFIX):
+            try:
+                payload = json.loads(line[len(SUPERVISOR_RESULT_PREFIX):])
+            except ValueError:
+                return None
+            return payload if isinstance(payload, dict) else None
+    return None
+
+
+def supervisor_close_body(parsed, log_excerpt=""):
+    """Map a SUPERVISOR_RESULT onto a TaskBus PATCH body.
+
+    Never returns Completed: verified work still goes to a human. A non-verified
+    outcome goes to HumanReviewNeeded too, because it needs a decision rather
+    than another silent attempt.
+    """
+    if not isinstance(parsed, dict):
+        return None
+    hint = str(parsed.get("status_hint") or "HumanReviewNeeded")
+    if hint not in SUPERVISOR_TERMINAL_STATUSES:
+        hint = "HumanReviewNeeded"
+    lines = [
+        "supervisor outcome=%s passes=%s" % (parsed.get("outcome"), parsed.get("passes")),
+        "reason: %s" % str(parsed.get("reason") or "")[:400],
+        "state: %s" % str(parsed.get("state_path") or ""),
+    ]
+    if log_excerpt:
+        lines.append("log tail: " + str(log_excerpt)[-800:])
+    body = {"machines_response": "\n".join(lines), "status": hint}
+    if hint == "Blocked":
+        body["re_opened_or_retry_reason"] = str(parsed.get("reason") or "supervisor blocked")[:400]
+    return body
+
+
+def supervisor_env_for_claim(claim, row_id):
+    """Convenience wrapper that sources the agent key, tolerating its absence."""
+    if not supervisor_enabled():
+        return {}
+    key = ""
+    try:
+        key = agent_api_key()
+    except Exception as exc:                          # noqa: BLE001 - key is optional here
+        log("supervisor bridge: no agent key (%s) - heartbeat will be off" % str(exc)[:80])
+    return supervisor_env_map(claim, row_id, api_key=key)
+
+
 def _gw_request(path, method="GET", body=None, nonce=None, timeout=30,
                 use_parent=False):
     """One gateway call. Raises GatewayError carrying status + detail, never the key."""
@@ -2628,8 +2720,12 @@ class Poller:
                     raise RuntimeError("claim payload scp failed: %s"
                                        % ((_ccp.stderr or "").strip()[:160],))
                 _req = "1" if _claim.get("execution_profile") else "0"
-                _env = ("TASKBUS_CLAIM_PAYLOAD=%s TASKBUS_PROFILE_REQUIRED=%s %s"
-                        % (_shlex.quote(_remote_claim), _req, _env))
+                _sup_env = supervisor_env_prefix(supervisor_env_for_claim(_claim, rid))
+                if _sup_env:
+                    log("row %s: supervisor bridge exporting %d env var(s) to the runner"
+                        % (rid, _sup_env.count("=")))
+                _env = ("%sTASKBUS_CLAIM_PAYLOAD=%s TASKBUS_PROFILE_REQUIRED=%s %s"
+                        % (_sup_env, _shlex.quote(_remote_claim), _req, _env))
                 log("row %s: shipped claim payload (%d bytes) profile_required=%s"
                     % (rid, os.path.getsize(_local_claim), _req))
             cmd = ("%ssetsid nohup bash %s %s python3 %s %s >/dev/null 2>&1 &"
@@ -2722,6 +2818,11 @@ class Poller:
             _req = "1" if _claim.get("execution_profile") else "0"
             env["TASKBUS_CLAIM_PAYLOAD"] = _local_claim
             env["TASKBUS_PROFILE_REQUIRED"] = _req
+            _sup_env_map = supervisor_env_for_claim(_claim, rid)
+            if _sup_env_map:
+                env.update(_sup_env_map)
+                log("row %s: supervisor bridge exporting %d env var(s) locally"
+                    % (rid, len(_sup_env_map)))
             log("row %s: local claim payload %d bytes profile_required=%s"
                 % (rid, os.path.getsize(_local_claim), _req))
         log("row %s: local dispatch shipping %d criterion check(s) + cwd=%s"
