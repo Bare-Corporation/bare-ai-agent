@@ -12,6 +12,7 @@ falling back to the node's local role.
 import contextlib
 import importlib.util
 import io
+import shutil
 import json
 import os
 import sys
@@ -360,6 +361,118 @@ class RowStampedModelRouteTests(unittest.TestCase):
                                     row_model="not-in-the-list"))
         self.assertEqual(env["BARE_AI_MODEL"], "claude-sonnet-4-6")
         self.assertIn("ROUTER WARNING", self.out)
+
+
+class FullMainRouteResolutionTests(unittest.TestCase):
+    """END-TO-END: main() must route the child env from the verified profile.
+
+    Rows 697, 698 and 701 all looked fixed in unit tests and still shipped
+    profile.env to the model. The reason was a mis-wired context: main() resolved
+    the route from load_claim_snapshot() (TASKBUS_CLAIM_FILE / _JSON), while the
+    poller ships TASKBUS_CLAIM_PAYLOAD, so that context was None on every real
+    dispatch. This test drives main() itself, so a mis-wiring cannot pass again.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="main-route-")
+        self.home = os.path.join(self.tmp, "home")
+        os.makedirs(os.path.join(self.home, ".bare-ai"), exist_ok=True)
+        # A node profile that would win if the route were not resolved:
+        with open(os.path.join(self.home, ".bare-ai", "profile.env"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("export BARE_AI_PROFILE=pro" + chr(10))
+            fh.write("export BARE_AI_ENDPOINT=https://api.anthropic.com/v1/messages" + chr(10))
+            fh.write("export BARE_AI_MODEL=claude-sonnet-4-6" + chr(10))
+            fh.write("export BARE_AI_API_KEY=not-a-real-key" + chr(10))
+        # A real, hash-valid claim payload: execution_config is POLICY ONLY.
+        payload = load_fixture()
+        self.payload_path = os.path.join(self.tmp, "claim.json")
+        with open(self.payload_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        self.prompt_path = os.path.join(self.tmp, "task.prompt")
+        with open(self.prompt_path, "w", encoding="utf-8") as fh:
+            fh.write("TASK-BUS JOB - row 701 (dispatched by the task-bus poller)" + chr(10))
+            fh.write("SHORT DESCRIPTION: canary" + chr(10))
+
+        self.job = load_runner()
+        self._saved_env = {}
+        for key in ("TASKBUS_CLAIM_PAYLOAD", "TASKBUS_CLAIM_FILE", "TASKBUS_CLAIM_JSON",
+                    "TASKBUS_PROFILE_REQUIRED", "TASKBUS_ROW_MODEL", "TASKBUS_CRITERION_JSON",
+                    "TASKBUS_AUDIT_FILE"):
+            self._saved_env[key] = os.environ.pop(key, None)
+        os.environ["TASKBUS_CLAIM_PAYLOAD"] = self.payload_path
+        os.environ["TASKBUS_PROFILE_REQUIRED"] = "1"
+        os.environ["TASKBUS_ROW_MODEL"] = "deepseek-v4-flash"
+
+        self._originals = {name: getattr(self.job, name)
+                           for name in ("HOME", "_central_models",
+                                        "_supervisor_enabled", "vault_api_key")}
+        self.job.HOME = self.home
+        self.job._central_models = lambda: (
+            {"models": [{"shortcut": "38", "model_id": "deepseek-v4-flash|deepseek-cn",
+                         "base_url": "https://api.deepseek.com"}]}, "")
+        self.job._supervisor_enabled = lambda: False
+        self.job.vault_api_key = lambda: (None, "not consulted in this test")
+        self.spawned = []
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = b""
+
+            def __init__(self):
+                self.stderr = b""
+
+        def fake_run(cmd, **kwargs):
+            self.spawned.append({"cmd": cmd, "env": dict(kwargs.get("env") or {})})
+            return FakeCompleted()
+
+        # Patch ONLY run: main() also uses subprocess.DEVNULL / PIPE / STDOUT and
+        # catches subprocess.TimeoutExpired, so replacing the module breaks it.
+        self._real_run = self.job.subprocess.run
+        self.job.subprocess.run = fake_run
+
+    def tearDown(self):
+        self.job.subprocess.run = self._real_run
+        for name in ("HOME", "_central_models", "_supervisor_enabled", "vault_api_key"):
+            setattr(self.job, name, self._originals[name])
+        for key, value in self._saved_env.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_main(self):
+        argv = list(sys.argv)
+        sys.argv = ["taskbus-agent-job.py", self.prompt_path]
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                self.job.main()
+        finally:
+            sys.argv = argv
+        return buf.getvalue()
+
+    def test_main_routes_the_child_env_from_the_verified_profile(self):
+        out = self._run_main()
+        self.assertTrue(self.spawned, "main() must have attempted one pass")
+        child = self.spawned[0]["env"]
+        self.assertEqual(child.get("BARE_AI_MODEL"), "deepseek-v4-flash")
+        self.assertEqual(child.get("BARE_AI_ENDPOINT"),
+                         "https://api.deepseek.com/v1/chat/completions")
+        # The single authoritative line, and never the profile as the winner.
+        self.assertIn("route in effect = execution_profile", out)
+        self.assertNotIn("route in effect = catalogue/node profile", out)
+
+    def test_main_still_reports_the_node_profile_as_the_route_in_effect(self):
+        # Control: with no verified profile the node profile must win, so the
+        # assertion above is not vacuous.
+        os.environ.pop("TASKBUS_CLAIM_PAYLOAD", None)
+        os.environ["TASKBUS_PROFILE_REQUIRED"] = "0"
+        out = self._run_main()
+        self.assertTrue(self.spawned, "main() must have attempted one pass")
+        child = self.spawned[0]["env"]
+        self.assertEqual(child.get("BARE_AI_MODEL"), "claude-sonnet-4-6")
+        self.assertIn("route in effect = catalogue/node profile", out)
 
 
 if __name__ == "__main__":

@@ -280,6 +280,22 @@ def apply_profile_route(ctx, env, row_model=None):
     return {"model": resolved, "endpoint": endpoint, "note": note}
 
 
+def _route_context(snap_ctx, profile_ctx):
+    """The VERIFIED execution-profile context to resolve the route from.
+
+    TWO gates can produce one and they read different variables:
+      * load_claim_snapshot() reads TASKBUS_CLAIM_FILE / TASKBUS_CLAIM_JSON;
+      * profile_gate() reads TASKBUS_CLAIM_JSON / TASKBUS_CLAIM_PAYLOAD.
+    The poller ships TASKBUS_CLAIM_PAYLOAD, so on a real dispatch snap_ctx is None
+    and profile_ctx is the verified snapshot. Resolving from snap_ctx alone is what
+    let profile.env win on row 701 while the row model sat in the environment.
+    """
+    for ctx in (snap_ctx, profile_ctx):
+        if isinstance(ctx, dict) and ctx.get("verified") is True:
+            return ctx
+    return None
+
+
 def shortcut_from_prompt(text):
     """Optional 'MODEL_SHORTCUT: <n>' line lets a task choose its own model."""
     import re as _re
@@ -1171,7 +1187,8 @@ def main():
     #     698). The route comes from the snapshot when it carries one, otherwise from
     #     the model the poller stamped on the row (TASKBUS_ROW_MODEL). Applied here,
     #     before the catalogue block, so the catalogue is skipped once a route is set.
-    _profile_route = apply_profile_route(_snap_ctx, env,
+    _route_ctx = _route_context(_snap_ctx, profile_ctx)
+    _profile_route = apply_profile_route(_route_ctx, env,
                                         row_model=os.environ.get("TASKBUS_ROW_MODEL", ""))
     if env.get("BARE_AI_API_KEY"):
         print("target-job: credential source = node profile/model-credentials.env")
@@ -1206,6 +1223,12 @@ def main():
                   % (cnote, FALLBACK_MODEL))
     else:
         env.setdefault("BARE_AI_MODEL", FALLBACK_MODEL)
+    # THE authoritative provenance line: one place, after every route decision has
+    # been made. The "route source = ..." lines above are pre-override history and
+    # read as though the node profile won even when the snapshot overrode it.
+    print("target-job: route in effect = %s model=%s endpoint=%s"
+          % ("execution_profile" if _profile_route else "catalogue/node profile",
+             env.get("BARE_AI_MODEL"), env.get("BARE_AI_ENDPOINT")))
     env.pop("NODE_TLS_REJECT_UNAUTHORIZED", None)
     ca = os.path.join(HOME, ".bare-ai", "ca", "vault-ca.crt")
     if os.path.exists(ca):
