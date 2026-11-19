@@ -813,6 +813,19 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout,
     row_id = (os.environ.get("TASKBUS_ROW_ID") or "").strip() or "unknown"
     workdir = cwd or os.getcwd()
     state_path = os.path.join(workdir, ".taskbus-state-%s.md" % row_id)
+    # Fail closed HERE, where the child env is handed over. main() resolves the
+    # credential before calling in (profile -> model-credentials.env -> Vault ->
+    # catalogue route) and the supervisor passes the same env to every child, so
+    # this only fires when a caller or a refactor supplies an unresolved
+    # environment. Without it the CLI answers with its own "Please set
+    # BARE_AI_API_KEY" text, which reads like a credential outage rather than the
+    # wiring fault it is.
+    if not (env.get("BARE_AI_API_KEY") or env.get("BARE_AI_ENDPOINT")):
+        print("supervisor: REFUSING - the child environment has neither "
+              "BARE_AI_API_KEY nor BARE_AI_ENDPOINT, so the CLI cannot route; "
+              "the caller must resolve credentials before the supervised run "
+              "(task NOT attempted, no attempt consumed)", file=sys.stderr)
+        return 75
     # criterion_spec is the PARSED check list main() decoded from the poller's
     # TASKBUS_CRITERION_JSON. The supervisor keys on a label string; only
     # _execute_criterion takes the parsed list.

@@ -60,20 +60,25 @@ def _now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def parse_cli_json(stdout):
-    """Extract the CLI's JSON envelope from stdout.
+def parse_cli_json(text, stream="stdout"):
+    """Extract the CLI's JSON envelope from one captured stream.
 
     Measured on CLI d0e4529f0: with -o json the object is preceded by 2-10
     preamble lines (tool-policy notice, YOLO banner, telemetry). A parser that
     assumes line 1 is JSON fails on every run, so scan for the first line that
     is exactly an opening brace and parse from there.
 
-    Raises CliOutputError when no object is present, carrying a short stdout
-    tail so the failure is diagnosable from the ticket.
+    Measured again 2026-11-19 on the installed bundle: the envelope arrives on
+    STDERR and stdout carries only the tool-policy line, so callers should use
+    parse_cli_envelope() rather than assume a stream. stream only names the
+    source in the error text.
+
+    Raises CliOutputError when no object is present, carrying a short tail so
+    the failure is diagnosable from the ticket.
     """
-    if not isinstance(stdout, str):
-        raise CliOutputError("stdout was %s, not str" % type(stdout).__name__)
-    lines = stdout.splitlines()
+    if not isinstance(text, str):
+        raise CliOutputError("%s was %s, not str" % (stream, type(text).__name__))
+    lines = text.splitlines()
     first_error = None
     for index, line in enumerate(lines):
         stripped = line.strip()
@@ -89,9 +94,26 @@ def parse_cli_json(stdout):
                 first_error = (index + 1, exc)
             continue
     if first_error is not None:
-        raise CliOutputError("JSON at stdout line %d is malformed: %s" % first_error)
+        raise CliOutputError("JSON at %s line %d is malformed: %s"
+                             % (stream, first_error[0], first_error[1]))
     tail = " | ".join(lines[-4:])[:300]
-    raise CliOutputError("no JSON object in stdout; tail: %s" % (tail or "<empty>"))
+    raise CliOutputError("no JSON object in %s; tail: %s" % (stream, tail or "<empty>"))
+
+
+def parse_cli_envelope(result):
+    """Return (envelope, stream_name) for a run_cli result dict.
+
+    stdout is tried first because a CLI that writes the envelope there is
+    equally valid; stderr is the stream today's CLI actually uses. Both are
+    preserved in the raised error, so a ticket shows what each carried.
+    """
+    errors = []
+    for stream in ("stdout", "stderr"):
+        try:
+            return parse_cli_json(result.get(stream) or "", stream), stream
+        except CliOutputError as exc:
+            errors.append(str(exc))
+    raise CliOutputError("no JSON envelope in either stream: " + " | ".join(errors))
 
 
 def spawn_depth_guard(depth, max_depth=MAX_SPAWN_DEPTH):
@@ -566,10 +588,13 @@ def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=N
             tools = result.get("tools") or {}
             if not session_id:
                 try:
-                    envelope = parse_cli_json(stdout)
+                    envelope, json_stream = parse_cli_envelope(result)
                     response = envelope.get("response") or ""
                     session_id = envelope.get("session_id")
                     tools = (envelope.get("stats") or {}).get("tools") or tools
+                    if json_stream != "stdout":
+                        emit("supervisor: pass %d envelope read from %s "
+                             "(stdout carried no JSON)" % (pass_no, json_stream))
                 except CliOutputError as exc:
                     emit("supervisor: pass %d produced no parseable JSON: %s" % (pass_no, exc))
 

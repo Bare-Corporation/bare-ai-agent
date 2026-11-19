@@ -298,5 +298,123 @@ class SupervisorCriterionSeamTests(unittest.TestCase):
             self.job._execute_criterion("file_exists:/tmp/x")
 
 
+class SupervisedChildEnvTests(unittest.TestCase):
+    """What the supervised CLI child actually receives.
+
+    _supervised_main is given the env main() resolved (profile, then
+    model-credentials.env, then Vault, then the catalogue route). These tests
+    capture the env handed to subprocess.Popen, so "the credentials reach the
+    child" is measured rather than assumed.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.job = load_job()
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="child-env-")
+        self.task_path = os.path.join(self.tmp, "task.md")
+        with open(self.task_path, "w", encoding="utf-8") as fh:
+            fh.write(REAL_ENVELOPE)
+        self.captured = {}
+        self._saved = {}
+        for key in ("TASKBUS_CRITERION", "TASKBUS_ROW_ID", "TASKBUS_CLAIM_NONCE"):
+            self._saved[key] = os.environ.pop(key, None)
+
+    def tearDown(self):
+        for key, value in self._saved.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fake_proc(self):
+        class FakeProc:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):
+                return 0
+
+        return FakeProc()
+
+    def _drive(self, env, criterion_spec=None):
+        captured = self.captured
+
+        def popen(cmd, env=None, **kwargs):
+            captured["cmd"] = cmd
+            captured["env"] = dict(env or {})
+            return self._fake_proc()
+
+        job = self.job
+        real_popen = job.subprocess.Popen
+        job.subprocess.Popen = popen
+
+        class FakeSupervisor:
+            DEFAULT_MAX_EXECUTION_SECONDS = 600
+
+            @staticmethod
+            def reflect_to_role_diary(*a, **k):
+                return None
+
+            @staticmethod
+            def drain_streams(proc):
+                return b"", b""
+
+            @staticmethod
+            def terminate_process_group(proc):
+                return None
+
+            @staticmethod
+            def run_supervised_loop(**kwargs):
+                captured["run_cli"] = kwargs["run_cli"]
+                captured["criteria"] = kwargs.get("criteria")
+                kwargs["run_cli"]("prompt", 1)
+                return {"outcome": "budget_exhausted", "reason": "seam test",
+                        "passes": 1, "state_path": kwargs.get("state_path")}
+
+        real_module = job._supervisor_module
+        job._supervisor_module = lambda: FakeSupervisor()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = job._supervised_main(None, self.tmp, self.task_path, REAL_ENVELOPE,
+                                          env, 1, 30, criterion_spec=criterion_spec)
+        finally:
+            job.subprocess.Popen = real_popen
+            job._supervisor_module = real_module
+        return rc
+
+    def test_resolved_credentials_reach_the_cli_child(self):
+        env = {
+            "BARE_AI_API_KEY": "test-key-not-a-secret",
+            "BARE_AI_ENDPOINT": "https://example.invalid/v1",
+            "BARE_AI_MODEL": "test-model",
+            "PATH": os.environ.get("PATH", ""),
+        }
+        self._drive(env)
+        child = self.captured.get("env") or {}
+        self.assertEqual(child.get("BARE_AI_API_KEY"), "test-key-not-a-secret")
+        self.assertEqual(child.get("BARE_AI_ENDPOINT"), "https://example.invalid/v1")
+        self.assertEqual(child.get("BARE_AI_MODEL"), "test-model")
+        # And the child command is the json-mode invocation the supervisor needs.
+        self.assertIn("-o", self.captured["cmd"])
+        self.assertIn("json", self.captured["cmd"])
+
+    def test_endpoint_only_child_is_allowed(self):
+        # A local engine needs no key: the CLI's own contract accepts an endpoint.
+        env = {"BARE_AI_ENDPOINT": "http://127.0.0.1:8000/v1", "PATH": ""}
+        self._drive(env)
+        child = self.captured.get("env") or {}
+        self.assertEqual(child.get("BARE_AI_ENDPOINT"), "http://127.0.0.1:8000/v1")
+        self.assertNotIn("BARE_AI_API_KEY", child)
+
+    def test_refuses_when_the_child_env_carries_no_credentials(self):
+        rc = self._drive({"PATH": os.environ.get("PATH", "")})
+        self.assertEqual(rc, 75)                      # main()'s TEMPFAIL convention
+        self.assertNotIn("env", self.captured)        # the CLI was never spawned
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

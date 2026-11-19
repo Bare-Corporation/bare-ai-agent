@@ -365,6 +365,72 @@ class ReflectionTests(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class CliStreamTests(unittest.TestCase):
+    """The CLI writes its -o json envelope to STDERR, not STDOUT.
+
+    Measured on this node 2026-11-19 with the installed bundle: stdout carried
+    one tool-policy line (126 bytes, no JSON) and stderr carried the YOLO banners
+    followed by the envelope. A supervisor that drains only stdout reports
+    "no parseable JSON" on every real run.
+    """
+
+    STDOUT_REAL = "Tool policy locked by the caller for this execution: tools enabled.\n"
+    STDERR_PREAMBLE = ("YOLO mode is enabled. All tool calls will be automatically approved.\n"
+                       "YOLO mode is enabled. All tool calls will be automatically approved.\n")
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="supstream-")
+        self.state_path = os.path.join(self.dir, ".taskbus-state-8.json")
+        self.logs = []
+
+    def tearDown(self):
+        for name in os.listdir(self.dir):
+            try:
+                os.unlink(os.path.join(self.dir, name))
+            except OSError:
+                pass
+        os.rmdir(self.dir)
+
+    def _run(self, stdout, stderr, criteria=None):
+        def run_cli(prompt, pass_no):
+            return {"exit_code": 0, "stdout": stdout, "stderr": stderr, "evidence": []}
+
+        return sup.run_supervised_loop(
+            8, "task", self.state_path, run_cli=run_cli,
+            criteria=criteria or [], max_passes=1, log=self.logs.append)
+
+    def test_envelope_is_read_from_stderr(self):
+        result = self._run(self.STDOUT_REAL,
+                           self.STDERR_PREAMBLE + json.dumps(
+                               {"session_id": "sess-from-stderr", "response": "work done"}))
+        recorded = result["state"]["passes"][0]
+        self.assertEqual(recorded["session_id"], "sess-from-stderr")
+        self.assertIn("work done", recorded["response_excerpt"])
+        self.assertTrue(any("envelope read from stderr" in line for line in self.logs))
+
+    def test_envelope_on_stdout_still_works(self):
+        # Control: a CLI that writes the envelope to stdout must keep working, and
+        # must NOT be reported as a stderr read.
+        result = self._run(self.STDOUT_REAL + json.dumps(
+            {"session_id": "sess-from-stdout", "response": "stdout answer"}), "")
+        recorded = result["state"]["passes"][0]
+        self.assertEqual(recorded["session_id"], "sess-from-stdout")
+        self.assertFalse(any("envelope read from stderr" in line for line in self.logs))
+
+    def test_stdout_wins_when_both_carry_an_envelope(self):
+        result = self._run(json.dumps({"session_id": "sess-stdout", "response": "a"}),
+                           json.dumps({"session_id": "sess-stderr", "response": "b"}))
+        self.assertEqual(result["state"]["passes"][0]["session_id"], "sess-stdout")
+
+    def test_neither_stream_reports_both(self):
+        self._run("just a notice\n", "just a banner\n")
+        joined = " | ".join(self.logs)
+        self.assertIn("no parseable JSON", joined)
+        # Both streams are named, so the ticket shows what each carried.
+        self.assertIn("stdout", joined)
+        self.assertIn("stderr", joined)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
