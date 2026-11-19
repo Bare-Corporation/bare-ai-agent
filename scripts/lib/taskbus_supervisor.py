@@ -116,6 +116,39 @@ def parse_cli_envelope(result):
     raise CliOutputError("no JSON envelope in either stream: " + " | ".join(errors))
 
 
+def format_cli_error(error):
+    """One readable line for a CLI envelope's error object, or "".
+
+    Measured shape on a failed turn (installed bundle, 2026-11-19):
+        {"session_id": "...", "error": {"type": "TypeError",
+                                        "message": "fetch failed", "code": 1}}
+    There is no "response" in that envelope, so a response-only excerpt records
+    nothing and the failure reason never reaches the state file or the ticket.
+    Deliberately total: any shape produces a line rather than raising, because
+    this runs on the failure path.
+    """
+    if not error:
+        return ""
+    if isinstance(error, str):
+        text = error.strip()
+        return ("CLI error: " + text[:400]) if text else ""
+    if isinstance(error, dict):
+        kind = str(error.get("type") or "").strip()
+        message = str(error.get("message") or "").strip()
+        code = error.get("code")
+        head = ": ".join(part for part in (kind, message) if part)
+        if code not in (None, ""):
+            head = (head + " ") if head else ""
+            head = head + "(code %s)" % code
+        if not head:
+            head = json.dumps(error, sort_keys=True)
+        return "CLI error: " + head[:400]
+    try:
+        return "CLI error: " + json.dumps(error, sort_keys=True)[:400]
+    except (TypeError, ValueError):
+        return "CLI error: " + str(error)[:400]
+
+
 def spawn_depth_guard(depth, max_depth=MAX_SPAWN_DEPTH):
     """Return (ok, reason). A ticket spawned at or beyond max_depth is refused."""
     try:
@@ -590,6 +623,14 @@ def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=N
                 try:
                     envelope, json_stream = parse_cli_envelope(result)
                     response = envelope.get("response") or ""
+                    if not response:
+                        # A failed turn carries error, not response. Without this the
+                        # pass records an empty excerpt and reads as a silent no-op.
+                        error_line = format_cli_error(envelope.get("error"))
+                        if error_line:
+                            response = error_line
+                            emit("supervisor: pass %d %s (cli exit %s)"
+                                 % (pass_no, error_line, exit_code))
                     session_id = envelope.get("session_id")
                     tools = (envelope.get("stats") or {}).get("tools") or tools
                     if json_stream != "stdout":

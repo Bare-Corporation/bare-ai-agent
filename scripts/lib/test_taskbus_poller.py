@@ -10,6 +10,7 @@ Run: python3 scripts/lib/test_taskbus_poller.py -v
 
 import datetime
 import importlib.util
+import os
 import pathlib
 import unittest
 
@@ -94,6 +95,130 @@ class ScheduleVerdictTests(unittest.TestCase):
         ok, kind, _ = self.verdict({"id": 9}, now=self.peak, policy="none")
         self.assertTrue(ok)
         self.assertEqual(kind, "ok")
+
+
+class SpawnDepthGuardTests(unittest.TestCase):
+    """The flag-gated spawn-depth guard on the poller side.
+
+    Flag OFF must stay inert (that is the whole point of the gate); flag ON must
+    walk parent_task, refuse at the limit, and export the depth so the runner can
+    apply its own guard.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load_poller()
+
+    def setUp(self):
+        self._saved = os.environ.pop("TASKBUS_SUPERVISOR", None)
+        self._originals = {}
+        for name in ("gateway_claim", "gateway_patch", "nonce_put", "log"):
+            self._originals[name] = getattr(self.m, name)
+        self.logs = []
+        self.patches = []
+        self.claims = []
+        self.m.log = lambda msg, level="INFO": self.logs.append((level, msg))
+        self.m.nonce_put = lambda rid, nonce: None
+        self.m.gateway_claim = self._fake_claim
+        self.m.gateway_patch = self._fake_patch
+
+    def tearDown(self):
+        for name, original in self._originals.items():
+            setattr(self.m, name, original)
+        os.environ.pop("TASKBUS_SUPERVISOR", None)
+        if self._saved is not None:
+            os.environ["TASKBUS_SUPERVISOR"] = self._saved
+
+    def _fake_claim(self, rid):
+        self.claims.append(rid)
+        return {"nonce": "nonce-%s" % rid, "attempts_taken": 1}
+
+    def _fake_patch(self, rid, body, nonce=None):
+        self.patches.append((rid, dict(body), nonce))
+        return {"ok": True}
+
+    def _bus(self, depth, problem=""):
+        bus = object.__new__(self.m.TaskBus)
+        bus.dry_run = False
+        bus.writes = 0
+        bus.last_claim = None
+        bus.spawn_depth = lambda rid: (depth, problem)
+        return bus
+
+    def _chain(self, rows):
+        def fetch(rid):
+            return rows.get(int(rid))
+        return fetch
+
+    # ---- the walk ------------------------------------------------------
+    def test_depth_walks_the_parent_chain(self):
+        rows = {10: {"id": 10, "parent_task": [{"id": 9}]},
+                9: {"id": 9, "parent_task": [{"id": 7}]},
+                7: {"id": 7, "parent_task": []}}
+        depth, problem = self.m.spawn_depth_for(10, self._chain(rows))
+        self.assertEqual(depth, 2)
+        self.assertEqual(problem, "")
+
+    def test_guard_refuses_at_the_limit(self):
+        allowed, _reason = self.m.spawn_depth_allows(2)
+        self.assertTrue(allowed)
+        allowed, reason = self.m.spawn_depth_allows(3)
+        self.assertFalse(allowed)
+        self.assertIn("limit", reason)
+
+    # ---- the export ----------------------------------------------------
+    def test_env_map_exports_the_depth(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self.m.supervisor_env_map({"nonce": "n"}, 12, spawn_depth=2)
+        self.assertEqual(env["TASKBUS_SPAWN_DEPTH"], "2")
+
+    def test_env_map_omits_the_depth_when_it_was_not_computed(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self.m.supervisor_env_map({"nonce": "n"}, 12)
+        self.assertNotIn("TASKBUS_SPAWN_DEPTH", env)
+
+    def test_env_for_claim_passes_the_depth_through(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self.m.supervisor_env_for_claim({"nonce": "n"}, 12, spawn_depth=1)
+        self.assertEqual(env["TASKBUS_SPAWN_DEPTH"], "1")
+
+    # ---- the claim-time guard -----------------------------------------
+    def test_claim_refuses_at_the_limit_and_blocks_the_row(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        bus = self._bus(3)
+        ok, detail = bus.claim(21, "job:td-taskbus-test", "claim note")
+        self.assertFalse(ok)
+        self.assertIn("spawn depth refused", detail)
+        self.assertEqual(self.claims, [21])          # claimed, so Blocked is writable
+        self.assertEqual(len(self.patches), 1)
+        rid, body, nonce = self.patches[0]
+        self.assertEqual(rid, 21)
+        self.assertEqual(body["status"], "Blocked")
+        self.assertIn("spawn depth refused", body["re_opened_or_retry_reason"])
+        self.assertIn("row not dispatched", body["machines_response"])
+        self.assertEqual(nonce, "nonce-21")
+        self.assertTrue(any(level == "ERROR" and "REFUSED" in msg
+                            for level, msg in self.logs))
+
+    def test_claim_proceeds_below_the_limit(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        bus = self._bus(2)
+        ok, detail = bus.claim(22, "job:td-taskbus-test2", "claim note")
+        self.assertTrue(ok)
+        self.assertIn("attempts=1", detail)
+        # Only the follow-up note is written - never a Blocked transition.
+        statuses = [body.get("status") for _rid, body, _nonce in self.patches]
+        self.assertNotIn("Blocked", statuses)
+
+    def test_flag_off_never_computes_a_depth(self):
+        called = []
+        bus = self._bus(3)
+        bus.spawn_depth = lambda rid: (called.append(rid) or (3, ""))
+        ok, _detail = bus.claim(23, "job:td-taskbus-test3", "claim note")
+        self.assertTrue(ok)                          # no guard when the flag is off
+        self.assertEqual(called, [])
+        statuses = [body.get("status") for _rid, body, _nonce in self.patches]
+        self.assertNotIn("Blocked", statuses)
 
 
 if __name__ == "__main__":

@@ -431,6 +431,64 @@ class CliStreamTests(unittest.TestCase):
         self.assertIn("stderr", joined)
 
 
+class CliErrorEnvelopeTests(unittest.TestCase):
+    """A failed turn carries an error object and no response.
+
+    The .16 canary recorded a session_id, exit 1 and an EMPTY response_excerpt,
+    because only envelope["response"] was read. The error is the only record of
+    why the turn failed, so it belongs in the pass record.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="superr-")
+        self.state_path = os.path.join(self.dir, ".taskbus-state-9.json")
+        self.logs = []
+
+    def tearDown(self):
+        for name in os.listdir(self.dir):
+            try:
+                os.unlink(os.path.join(self.dir, name))
+            except OSError:
+                pass
+        os.rmdir(self.dir)
+
+    def _run(self, envelope_obj):
+        def run_cli(prompt, pass_no):
+            return {"exit_code": 1, "stdout": "", "stderr": json.dumps(envelope_obj),
+                    "evidence": []}
+
+        return sup.run_supervised_loop(9, "task", self.state_path, run_cli=run_cli,
+                                       criteria=[], max_passes=1, log=self.logs.append)
+
+    def test_error_envelope_becomes_the_excerpt(self):
+        result = self._run({"session_id": "sid-err",
+                            "error": {"type": "TypeError",
+                                      "message": "fetch failed", "code": 1}})
+        excerpt = result["state"]["passes"][0]["response_excerpt"]
+        self.assertIn("TypeError", excerpt)
+        self.assertIn("fetch failed", excerpt)
+        self.assertIn("(code 1)", excerpt)
+        # And it is in the pass log, not only in the state file.
+        self.assertTrue(any("CLI error" in line for line in self.logs))
+
+    def test_a_real_response_still_wins(self):
+        result = self._run({"session_id": "s", "response": "done",
+                            "error": {"message": "a warning"}})
+        self.assertIn("done", result["state"]["passes"][0]["response_excerpt"])
+
+    def test_string_error_is_surfaced(self):
+        result = self._run({"session_id": "s", "error": "quota exhausted"})
+        self.assertIn("quota exhausted", result["state"]["passes"][0]["response_excerpt"])
+
+    def test_format_cli_error_is_total(self):
+        # Runs on the failure path: it must never raise, whatever the shape.
+        self.assertEqual(sup.format_cli_error(None), "")
+        self.assertEqual(sup.format_cli_error({}), "")
+        self.assertIn("boom", sup.format_cli_error({"message": "boom"}))
+        self.assertIn("weird", sup.format_cli_error("weird"))
+        self.assertIn("42", sup.format_cli_error(42))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

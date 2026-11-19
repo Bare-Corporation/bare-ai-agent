@@ -1080,7 +1080,40 @@ def supervisor_enabled():
     return (os.environ.get("TASKBUS_SUPERVISOR") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def supervisor_env_map(claim, row_id, api_key=None, api_base=None):
+def supervisor_module():
+    """The supervisor module, or None. Its depth helpers are the single source."""
+    try:
+        import taskbus_supervisor
+        return taskbus_supervisor
+    except Exception:                                # noqa: BLE001 - optional import
+        return None
+
+
+def spawn_depth_for(row_id, fetch_row):
+    """(depth, problem) walking parent_task with the supervisor's own walker.
+
+    fetch_row(id) returns a row dict or None. The walk is capped and cycle-safe
+    inside taskbus_supervisor, so a malformed chain reports a problem instead of
+    hanging the cycle.
+    """
+    sup = supervisor_module()
+    if sup is None:
+        return 0, "taskbus_supervisor module unavailable - depth not computed"
+    try:
+        return sup.depth_from_parent_chain(int(row_id), fetch_row)
+    except (TypeError, ValueError):
+        return 0, "row id %r is not an integer" % (row_id,)
+
+
+def spawn_depth_allows(depth):
+    """(ok, reason) from the supervisor's guard. Allows when the module is absent."""
+    sup = supervisor_module()
+    if sup is None:
+        return True, ""
+    return sup.spawn_depth_guard(depth)
+
+
+def supervisor_env_map(claim, row_id, api_key=None, api_base=None, spawn_depth=None):
     """Environment additions for the runner. Empty dict when the flag is off."""
     if not supervisor_enabled():
         return {}
@@ -1090,6 +1123,13 @@ def supervisor_env_map(claim, row_id, api_key=None, api_base=None):
         out["TASKBUS_CLAIM_NONCE"] = nonce
     if row_id not in (None, ""):
         out["TASKBUS_ROW_ID"] = str(row_id)
+    # The runner reads this for its own spawn-depth refusal. Exported only when the
+    # caller computed it: an absent value must not look like depth 0.
+    if spawn_depth not in (None, ""):
+        try:
+            out["TASKBUS_SPAWN_DEPTH"] = str(int(spawn_depth))
+        except (TypeError, ValueError):
+            pass
     # The key is deliberately NOT exported any more: supervisor_env_prefix renders
     # this map into a REMOTE ssh command line, so a key placed here is visible in
     # ps on the target node. The runner resolves its own key from Vault instead
@@ -1149,7 +1189,7 @@ def supervisor_close_body(parsed, log_excerpt=""):
     return body
 
 
-def supervisor_env_for_claim(claim, row_id):
+def supervisor_env_for_claim(claim, row_id, spawn_depth=None):
     """Environment for one claim. The runner sources its own key, so none is sent.
 
     This used to fetch the agent key and pass it in, purely so it could be exported.
@@ -1158,7 +1198,7 @@ def supervisor_env_for_claim(claim, row_id):
     """
     if not supervisor_enabled():
         return {}
-    return supervisor_env_map(claim, row_id)
+    return supervisor_env_map(claim, row_id, spawn_depth=spawn_depth)
 
 
 def _gw_request(path, method="GET", body=None, nonce=None, timeout=30,
@@ -1435,6 +1475,15 @@ class TaskBus:
             nonce_put(rid, nonce)
             return gateway_patch(rid, body, nonce=nonce)
 
+    def spawn_depth(self, rid):
+        """(depth, problem) for a row, walking parent_task through the gateway.
+
+        One gateway read per hop, and the walk stops at the supervisor's own cap,
+        so this is a handful of calls at most. get_row is the same read the runner
+        uses, so the two cannot disagree about the chain.
+        """
+        return spawn_depth_for(rid, self.get_row)
+
     def claim(self, rid, job_task_id, note):
         """Claim via POST /claim, then attach this poller's job id and note.
 
@@ -1445,6 +1494,19 @@ class TaskBus:
         if self.dry_run:
             log("DRY-RUN  would CLAIM row %s via gateway (%s)" % (rid, job_task_id))
             return False, "dry-run"
+        # FLAG-GATED SPAWN-DEPTH GUARD. Decided BEFORE the claim so a refused row is
+        # never worked, and written AFTER it because the gateway authorises the
+        # Blocked transition with the claim nonce and an unclaimed row has none.
+        depth_block = ""
+        if supervisor_enabled():
+            depth, problem = self.spawn_depth(rid)
+            if problem:
+                log("row %s: spawn depth NOT computed (%s)" % (rid, problem), "WARN")
+            allowed, reason = spawn_depth_allows(depth)
+            if not allowed:
+                depth_block = "spawn depth refused: %s" % reason
+                log("row %s: REFUSED at claim time - %s (no runner will be spawned)"
+                    % (rid, depth_block), "ERROR")
         try:
             claim = gateway_claim(rid)
         except GatewayError as exc:
@@ -1461,6 +1523,20 @@ class TaskBus:
         self.writes += 1
         log("CLAIMED  row %s via gateway: attempt %s"
             % (rid, claim.get("attempts_taken")))
+        if depth_block:
+            # Blocked in the same breath as the claim, so the row leaves the queue
+            # with a reason on it and the caller's "continue" is the end of it.
+            blocked_note = append_note(note, depth_block + " (row not dispatched)")
+            try:
+                gateway_patch(rid, {"status": "Blocked",
+                                    "machines_response": blocked_note,
+                                    "re_opened_or_retry_reason": depth_block},
+                              nonce=nonce)
+                log("row %s: marked Blocked - %s" % (rid, depth_block))
+            except GatewayError as exc:
+                log("row %s: depth refusal could NOT be written to the row: %s"
+                    % (rid, str(exc)[:200]), "ERROR")
+            return False, depth_block
         try:
             gateway_patch(rid, {"corresponding_machine_task_id": job_task_id,
                                 "machines_response": note}, nonce=nonce)
@@ -2728,7 +2804,12 @@ class Poller:
                     raise RuntimeError("claim payload scp failed: %s"
                                        % ((_ccp.stderr or "").strip()[:160],))
                 _req = "1" if _claim.get("execution_profile") else "0"
-                _sup_env = supervisor_env_prefix(supervisor_env_for_claim(_claim, rid))
+                _depth, _dprob = self.bus.spawn_depth(rid)
+                if _dprob:
+                    log("row %s: spawn depth not computed for the dispatch (%s)"
+                        % (rid, _dprob), "WARN")
+                _sup_env = supervisor_env_prefix(
+                    supervisor_env_for_claim(_claim, rid, spawn_depth=_depth))
                 if _sup_env:
                     log("row %s: supervisor bridge exporting %d env var(s) to the runner"
                         % (rid, _sup_env.count("=")))
