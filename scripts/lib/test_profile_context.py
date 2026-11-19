@@ -118,5 +118,45 @@ class TestAuditStamp(unittest.TestCase):
         self.assertNotIn("BARE-AI", stamp)
 
 
+class TestProfileRoute(unittest.TestCase):
+    """The routed model a verified snapshot names (row 697).
+
+    The repo fixture is a v1 snapshot and carries no route, which is why the runner
+    had nothing to prefer over the node profile. A v2 execution_config stamps a
+    routed model, and the ctx must surface it.
+    """
+
+    def test_v1_fixture_carries_no_route(self):
+        self.assertIsNone(pc.verify(load_fixture())["route"])
+
+    def test_routed_model_is_surfaced_from_execution_config(self):
+        payload = copy.deepcopy(load_fixture())
+        snap = payload["execution_profile"]["snapshot"]
+        snap["execution_config"]["routed_model"] = "deepseek-v4-flash|deepseek-cn"
+        # Re-hash so the gate passes: this is a shape test, not a tamper test.
+        payload["execution_profile"]["config_hash"] = pc.sha256_hex_json(
+            snap["execution_config"])
+        payload["execution_profile"]["profile_hash"] = pc.sha256_hex_json(snap)
+        route = pc.verify(payload)["route"]
+        self.assertEqual(route["model_id"], "deepseek-v4-flash|deepseek-cn")
+        self.assertEqual(route["base_url"], "")
+        self.assertEqual(route["source"], "execution_config.routed_model")
+
+    def test_object_shaped_route_keeps_its_base_url(self):
+        snap = {"execution_config": {"model_catalog": {
+            "model_id": "deepseek-v4-flash|deepseek-cn",
+            "base_url": "https://api.deepseek.com"}}}
+        route = pc.profile_route(snap)
+        self.assertEqual(route["model_id"], "deepseek-v4-flash|deepseek-cn")
+        self.assertEqual(route["base_url"], "https://api.deepseek.com")
+        self.assertEqual(route["source"], "execution_config.model_catalog")
+
+    def test_profile_route_never_raises_on_junk(self):
+        self.assertIsNone(pc.profile_route(None))
+        self.assertIsNone(pc.profile_route({}))
+        self.assertIsNone(pc.profile_route({"execution_config": {}}))
+        self.assertIsNone(pc.profile_route({"execution_config": {"routed_model": 42}}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

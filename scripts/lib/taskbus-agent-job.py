@@ -130,43 +130,133 @@ def build_context_preamble(pinned_role=None, pinned_label=""):
                   "environment": len(env_body), "archetype": len(arch)}
 
 
-def central_route(shortcut):
-    """Resolve (endpoint, model, note) from the CENTRAL model list.
+def _central_models():
+    """(payload, error) from the CENTRAL model list. READ-ONLY, one fetch.
 
-    The list is the single source of truth for per-model routes and shortcut numbers
-    (e.g. 303 -> deepseek-v4-flash), which is how the interactive launcher works.
-
-    TWO CONVERSIONS ARE REQUIRED, both established by testing against the real API:
-      1. model_id arrives as 'deepseek-v4-flash|deepseek-cn'. The CLI REJECTS the pipe
-         form (rc=1), so take the part before the pipe.
-      2. base_url arrives WITHOUT the completions path ('https://api.deepseek.com').
-         The CLI needs the full endpoint, so append it:
-            .../v1        -> + /chat/completions
-            otherwise     -> + /v1/chat/completions
-         (the Alibaba entries already end in /compatible-mode/v1, which resolves correctly)
-      3. A User-Agent is MANDATORY. Cloudflare returns 403 for the default python-urllib
-         UA while curl/browser/node UAs pass - verified. Without this the runner would
-         conclude the central API was down and silently fall back to hardcoded values.
+    A User-Agent is MANDATORY: Cloudflare answers the default python-urllib UA with
+    403 while curl/browser/node UAs pass - verified. Without it the runner would
+    conclude the central API was down and silently fall back to hardcoded values.
     """
     try:
         rq = urllib.request.Request(CENTRAL_MODELS_URL)
         rq.add_header("Accept", "application/json")
         rq.add_header("User-Agent", "bare-ai-taskbus/1.0 curl/8.5.0")
         with urllib.request.urlopen(rq, timeout=25) as r:
-            data = json.loads(r.read())
+            return json.loads(r.read()), ""
     except Exception as e:
-        return None, None, "%s: %s" % (type(e).__name__, str(e)[:70])
+        return None, "%s: %s" % (type(e).__name__, str(e)[:70])
+
+
+def _completions_url(base_url):
+    """The full chat-completions URL the CLI needs, from a catalogue base_url.
+
+    base_url arrives WITHOUT the completions path ('https://api.deepseek.com'), so:
+        .../v1        -> + /chat/completions
+        otherwise     -> + /v1/chat/completions
+    (the Alibaba entries already end in /compatible-mode/v1, which resolves correctly)
+    """
+    bu = (base_url or "").strip().rstrip("/")
+    if not bu:
+        return ""
+    if "://" not in bu:
+        bu = "http://" + bu
+    return bu + "/chat/completions" if bu.endswith("/v1") else bu + "/v1/chat/completions"
+
+
+def _model_core(model_id):
+    """The part before the pipe: the CLI REJECTS the 'deepseek-v4-flash|deepseek-cn' form."""
+    return (model_id or "").split("|")[0].strip()
+
+
+def central_route(shortcut):
+    """Resolve (endpoint, model, note) from the CENTRAL model list by SHORTCUT.
+
+    The list is the single source of truth for per-model routes and shortcut numbers
+    (e.g. 303 -> deepseek-v4-flash), which is how the interactive launcher works.
+    """
+    data, err = _central_models()
+    if data is None:
+        return None, None, err
     for m in (data.get("models") or []):
-        if str(m.get("shortcut")) == str(shortcut):
-            mid = (m.get("model_id") or "").split("|")[0].strip()
-            bu = (m.get("base_url") or "").strip().rstrip("/")
-            if not mid or not bu:
-                return None, None, "shortcut %s incomplete in list" % shortcut
-            if "://" not in bu:
-                bu = "http://" + bu
-            ep = bu + "/chat/completions" if bu.endswith("/v1") else bu + "/v1/chat/completions"
-            return ep, mid, "central list shortcut %s" % shortcut
+        if str(m.get("shortcut")) != str(shortcut):
+            continue
+        mid = _model_core(m.get("model_id"))
+        ep = _completions_url(m.get("base_url"))
+        if not mid or not ep:
+            return None, None, "shortcut %s incomplete in list" % shortcut
+        return ep, mid, "central list shortcut %s" % shortcut
     return None, None, "shortcut %s not present in list" % shortcut
+
+
+def catalogue_route_for_model(model_id):
+    """Resolve (endpoint, model, note) from the CENTRAL model list by MODEL ID.
+
+    Matches the stamped id first, then the id with the provider suffix stripped,
+    because a snapshot and the list may disagree about the suffix.
+    """
+    want = (model_id or "").strip()
+    if not want:
+        return None, None, "no model id supplied"
+    data, err = _central_models()
+    if data is None:
+        return None, None, err
+    want_core = _model_core(want)
+    for m in (data.get("models") or []):
+        mid_full = (m.get("model_id") or "").strip()
+        if not mid_full:
+            continue
+        mid_core = _model_core(mid_full)
+        if mid_full != want and (not want_core or mid_core != want_core):
+            continue
+        ep = _completions_url(m.get("base_url"))
+        if not ep or not mid_core:
+            continue
+        return ep, mid_core, "central list model %s" % mid_full
+    return None, None, "model %s not present in the central list" % want
+
+
+def apply_profile_route(ctx, env):
+    """Make a VERIFIED snapshot's route authoritative over the node profile.
+
+    WHY (row 697): .16's snapshot routed deepseek-v4-flash|deepseek-cn while
+    ~/.bare-ai/profile.env said claude-sonnet-4-6 @ api.anthropic.com. The profile
+    won because nothing here read the snapshot route, so a DeepSeek key was posted
+    to Anthropic and answered 401. A verified snapshot is the authority for what
+    the row runs on; the node profile only fills in when the snapshot names no
+    route at all.
+
+    Returns the applied route dict, or None when the snapshot names no usable
+    route - in which case the caller's profile/catalogue decision stands.
+    """
+    route = (ctx or {}).get("route") or None
+    if not route:
+        return None
+    model = str(route.get("model_id") or "").strip()
+    base = str(route.get("base_url") or "").strip()
+    source = str(route.get("source") or "execution_profile")
+    if not model and not base:
+        return None
+    if base:
+        endpoint, resolved, note = _completions_url(base), _model_core(model), source
+    else:
+        endpoint, resolved, note = catalogue_route_for_model(model)
+    if not endpoint or not resolved:
+        print("target-job: ROUTER WARNING execution_profile route %r could not be "
+              "resolved (%s) - the node profile route stands" % (model, note))
+        return None
+    previous_endpoint = env.get("BARE_AI_ENDPOINT") or ""
+    previous_model = env.get("BARE_AI_MODEL") or ""
+    env["BARE_AI_ENDPOINT"] = endpoint
+    env["BARE_AI_MODEL"] = resolved
+    print("target-job: route source = execution_profile (%s) model=%s endpoint=%s"
+          % (note, resolved, endpoint))
+    if previous_endpoint and previous_endpoint != endpoint:
+        # The key provenance is now worth checking: a key that belongs to the
+        # overridden provider would fail exactly as row 697 did.
+        print("target-job: ROUTER WARNING execution_profile overrode the node profile "
+              "route (%s model=%s); confirm the credential matches %s"
+              % (previous_endpoint, previous_model, resolved))
+    return {"model": resolved, "endpoint": endpoint, "note": note}
 
 
 def shortcut_from_prompt(text):
@@ -1056,6 +1146,10 @@ def main():
     if profile.get("BARE_AI_ENDPOINT"):
         print("target-job: route source = node profile (%s) model=%s"
               % (profile.get("BARE_AI_PROFILE") or "?", env.get("BARE_AI_MODEL")))
+    # 1b. A VERIFIED execution_profile route OUTRANKS the node profile (row 697).
+    #     Applied here, before the catalogue block, so the catalogue is skipped when
+    #     the snapshot named a route - which is what made the profile win before.
+    _profile_route = apply_profile_route(_snap_ctx, env)
     if env.get("BARE_AI_API_KEY"):
         print("target-job: credential source = node profile/model-credentials.env")
 

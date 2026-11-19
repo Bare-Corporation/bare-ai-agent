@@ -9,6 +9,7 @@ The important cases are the NEGATIVE ones: a corrupted snapshot must be refused,
 and a profile-bound row with no snapshot must be refused rather than silently
 falling back to the node's local role.
 """
+import contextlib
 import importlib.util
 import io
 import json
@@ -166,6 +167,95 @@ class TestInertWhenUnbound(GateTestBase):
         body = json.loads(line.split(":", 1)[1].strip())
         self.assertTrue(body["ok"])
         self.assertFalse(body["applied"])
+
+
+class ProfileRoutePrecedenceTests(unittest.TestCase):
+    """Row 697: a VERIFIED snapshot's route outranks the node's local profile.env.
+
+    .16's snapshot routed deepseek-v4-flash|deepseek-cn while profile.env said
+    claude-sonnet-4-6 at api.anthropic.com, and the profile won - so a DeepSeek key
+    was posted to Anthropic. These tests assert on the child env dict itself, plus
+    the log line an operator reads on the ticket.
+    """
+
+    # The pair that produced the 401, verbatim.
+    PROFILE_ENV = {"BARE_AI_ENDPOINT": "https://api.anthropic.com/v1/messages",
+                   "BARE_AI_MODEL": "claude-sonnet-4-6"}
+    DEEPSEEK_ROUTE = {"model_id": "deepseek-v4-flash|deepseek-cn", "base_url": "",
+                      "source": "execution_config.routed_model"}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.job = load_runner()
+
+    def setUp(self):
+        self._real_central = self.job._central_models
+        self.out = ""
+
+    def tearDown(self):
+        self.job._central_models = self._real_central
+
+    def _catalogue(self, models):
+        self.job._central_models = lambda: ({"models": models}, "")
+
+    def _run(self, ctx, env):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = self.job.apply_profile_route(ctx, env)
+        self.out = buf.getvalue()
+        return result
+
+    def test_verified_profile_route_beats_the_node_profile(self):
+        self._catalogue([{"shortcut": "12",
+                          "model_id": "deepseek-v4-flash|deepseek-cn",
+                          "base_url": "https://api.deepseek.com"}])
+        env = dict(self.PROFILE_ENV)
+        applied = self._run({"route": dict(self.DEEPSEEK_ROUTE)}, env)
+        self.assertEqual(env["BARE_AI_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.deepseek.com/v1/chat/completions")
+        self.assertEqual(applied["endpoint"], env["BARE_AI_ENDPOINT"])
+        self.assertIn("route source = execution_profile", self.out)
+        self.assertIn("overrode the node profile", self.out)
+
+    def test_without_a_snapshot_route_the_profile_stands(self):
+        # The fallback half of the requirement: profile.env is a fallback, and
+        # stays one when the snapshot names no route.
+        env = dict(self.PROFILE_ENV)
+        self.assertIsNone(self._run({"route": None}, env))
+        self.assertEqual(env["BARE_AI_MODEL"], "claude-sonnet-4-6")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.anthropic.com/v1/messages")
+        self.assertEqual(self.out, "")
+
+    def test_snapshot_base_url_needs_no_catalogue(self):
+        def boom():
+            raise AssertionError("the catalogue must not be consulted")
+        self.job._central_models = boom
+        env = {"BARE_AI_ENDPOINT": "https://api.anthropic.com/v1/messages",
+               "BARE_AI_MODEL": "claude-sonnet-4-6"}
+        self._run({"route": {"model_id": "some-model|cn",
+                             "base_url": "https://api.example.com/v1"}}, env)
+        self.assertEqual(env["BARE_AI_MODEL"], "some-model")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.example.com/v1/chat/completions")
+
+    def test_catalogue_match_ignores_the_provider_suffix(self):
+        # The list may carry the bare id while the snapshot carries the piped one.
+        self._catalogue([{"shortcut": "12", "model_id": "deepseek-v4-flash",
+                          "base_url": "https://api.deepseek.com"}])
+        env = dict(self.PROFILE_ENV)
+        self._run({"route": dict(self.DEEPSEEK_ROUTE)}, env)
+        self.assertEqual(env["BARE_AI_MODEL"], "deepseek-v4-flash")
+
+    def test_an_unresolvable_route_keeps_the_profile_and_warns(self):
+        self._catalogue([])                       # the routed model is absent
+        env = dict(self.PROFILE_ENV)
+        self.assertIsNone(self._run({"route": {"model_id": "not-in-the-list"}}, env))
+        self.assertEqual(env["BARE_AI_MODEL"], "claude-sonnet-4-6")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.anthropic.com/v1/messages")
+        self.assertIn("ROUTER WARNING", self.out)
 
 
 if __name__ == "__main__":

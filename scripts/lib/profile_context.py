@@ -91,6 +91,48 @@ def extract(payload: dict) -> dict:
     return block
 
 
+# A routed model can be stamped under any of these, on execution_config or on the
+# snapshot itself. Order matters only when more than one is present.
+PROFILE_ROUTE_KEYS = ("routed_model", "model_catalog", "routed_model_id", "model_id")
+
+
+def _route_value(value):
+    """Normalise one routed-model field into {"model_id","base_url"} or None."""
+    if isinstance(value, str):
+        text = value.strip()
+        return {"model_id": text, "base_url": ""} if text else None
+    if isinstance(value, dict):
+        model = str(value.get("model_id") or value.get("model")
+                    or value.get("id") or "").strip()
+        base = str(value.get("base_url") or value.get("endpoint") or "").strip()
+        if model or base:
+            return {"model_id": model, "base_url": base}
+    return None
+
+
+def profile_route(snap):
+    """The routed target a verified snapshot names, or None.
+
+    Returned shape: {"model_id", "base_url", "source"} where source names the
+    field it came from, so the runner can say what it obeyed. Never raises: a
+    snapshot with no route is normal (v1) and simply returns None.
+    """
+    if not isinstance(snap, dict):
+        return None
+    ecfg = snap.get("execution_config") or {}
+    for container, label in ((ecfg, "execution_config"), (snap, "snapshot")):
+        if not isinstance(container, dict):
+            continue
+        for key in PROFILE_ROUTE_KEYS:
+            if key not in container:
+                continue
+            parsed = _route_value(container.get(key))
+            if parsed:
+                parsed["source"] = "%s.%s" % (label, key)
+                return parsed
+    return None
+
+
 def verify(payload: dict) -> dict:
     """Verify the snapshot and return a context dict. Raises on any mismatch."""
     block = extract(payload)
@@ -146,6 +188,7 @@ def verify(payload: dict) -> dict:
         "role_alias": role.get("alias") or ecfg.get("role_alias"),
         "role_row_id": role.get("row_id"),
         "system_prompt": markdown,
+        "route": profile_route(snap),
         "router": {
             "routing_strategy": ecfg.get("routing_strategy"),
             "routing_ceiling_eur": ecfg.get("routing_ceiling_eur"),
