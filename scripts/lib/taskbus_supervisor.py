@@ -56,6 +56,26 @@ class CliOutputError(SupervisorError):
     """The CLI stdout carried no parseable JSON object."""
 
 
+class HeartbeatLost(SupervisorError):
+    """The claim is no longer ours. Acting on this is not optional.
+
+    status is the HTTP status the gateway answered: 403/409/410 mean the nonce or
+    the ownership is gone, which is FATAL - the child must be killed at once and
+    must not be allowed to write back. Anything else (a transport error, a 5xx, a
+    401 from a bad credential) is transient and is retried up to max_failures.
+    """
+
+    FATAL_STATUSES = (403, 409, 410)
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def fatal(self):
+        return self.status in self.FATAL_STATUSES
+
+
 def _now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -359,11 +379,17 @@ class StateFile:
         return "\n".join(lines)
 
 
-def drain_streams(proc, chunk=65536, join_timeout=30.0):
+def drain_streams(proc, chunk=65536, join_timeout=30.0, watch=None,
+                  poll_interval=0.5):
     """Read proc.stdout and proc.stderr concurrently and return (out, err) bytes.
 
     PIPE on both streams deadlocks once a child fills the unread buffer, so each
     stream gets its own thread. Missing streams are tolerated.
+
+    watch, when given, is polled every poll_interval while the pumps run and this
+    returns as soon as it says True - the caller is then expected to kill the
+    child. Without it a lost claim stays invisible until the child exits, which is
+    how attempt 1 kept running beside a re-claim on row 702.
     """
     out = bytearray()
     err = bytearray()
@@ -386,8 +412,22 @@ def drain_streams(proc, chunk=65536, join_timeout=30.0):
     ]
     for thread in threads:
         thread.start()
+    deadline = time.monotonic() + float(join_timeout)
+    while True:
+        if all(not thread.is_alive() for thread in threads):
+            break
+        if watch is not None:
+            try:
+                if watch():
+                    break
+            except Exception:                        # noqa: BLE001 - a watcher must not abort the run
+                pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(poll_interval, remaining))
     for thread in threads:
-        thread.join(join_timeout)
+        thread.join(timeout=0.2)
     return bytes(out), bytes(err)
 
 
@@ -400,7 +440,8 @@ class Heartbeat:
     and the caller is expected to kill the child process group immediately.
     """
 
-    def __init__(self, interval, call, max_failures=3, name="taskbus-heartbeat"):
+    def __init__(self, interval, call, max_failures=3, name="taskbus-heartbeat",
+                 on_lost=None, log=None):
         self.interval = float(interval)
         self.call = call
         self.max_failures = int(max_failures)
@@ -408,8 +449,36 @@ class Heartbeat:
         self.lost_reason = None
         self.beats = 0
         self.failures = 0
+        self.on_lost = on_lost
+        self.log = log
         self._stop = threading.Event()
         self._thread = None
+
+    def _note_failure(self, exc):
+        if self.log is None:
+            return
+        try:
+            self.log("heartbeat failure %d/%d (will retry): %s"
+                     % (self.failures, self.max_failures, exc))
+        except Exception:                        # noqa: BLE001
+            pass
+
+    def _declare_lost(self, reason):
+        """Set lost_reason and tell the caller AT ONCE, not at the next pass."""
+        if self.lost_reason is not None:
+            return
+        self.lost_reason = reason or "heartbeat lost"
+        self._stop.set()
+        if self.log is not None:
+            try:
+                self.log("heartbeat LOST: %s" % self.lost_reason)
+            except Exception:                        # noqa: BLE001 - logging must not kill the run
+                pass
+        if self.on_lost is not None:
+            try:
+                self.on_lost(self.lost_reason)
+            except Exception:                        # noqa: BLE001 - same
+                pass
 
     def start(self):
         if self._thread is not None:
@@ -428,11 +497,22 @@ class Heartbeat:
                 self.call()
                 self.beats += 1
                 self.failures = 0
-            except Exception as exc:                 # noqa: BLE001 - any refusal means trouble
+            except HeartbeatLost as exc:
+                # Ownership or authorisation is GONE: retrying cannot help, and the
+                # child must not keep running beside a re-claim.
+                if exc.fatal:
+                    self._declare_lost(str(exc) or "claim lost (HTTP %s)" % exc.status)
+                    return
                 self.failures += 1
+                self._note_failure(exc)
                 if self.failures >= self.max_failures:
-                    self.lost_reason = str(exc) or exc.__class__.__name__
-                    self._stop.set()
+                    self._declare_lost(str(exc) or exc.__class__.__name__)
+                    return
+            except Exception as exc:                 # noqa: BLE001 - transport/unknown
+                self.failures += 1
+                self._note_failure(exc)
+                if self.failures >= self.max_failures:
+                    self._declare_lost(str(exc) or exc.__class__.__name__)
                     return
 
     @property
@@ -550,6 +630,7 @@ def reflect_to_role_diary(role_path, diary_path, findings, max_chars=4000,
 def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=None,
                         allowed_paths=None, criteria=None, spawn_depth=0,
                         lease_seconds=DEFAULT_LEASE_SECONDS, heartbeat_interval=None,
+                        on_lost=None,
                         max_passes=DEFAULT_MAX_PASSES,
                         max_tool_iterations=DEFAULT_MAX_TOOL_ITERATIONS,
                         max_execution_seconds=DEFAULT_MAX_EXECUTION_SECONDS,
@@ -584,7 +665,10 @@ def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=N
     heartbeat = None
     if heartbeat_call is not None:
         interval = heartbeat_interval if heartbeat_interval else max(1.0, lease_seconds / 3.0)
-        heartbeat = Heartbeat(interval, heartbeat_call).start()
+        # on_lost fires the moment ownership is lost, which is what lets the
+        # caller kill the child mid-pass instead of waiting for it to exit.
+        heartbeat = Heartbeat(interval, heartbeat_call, on_lost=on_lost,
+                              log=emit).start()
         emit("supervisor: heartbeat every %.1fs" % interval)
     else:
         emit("supervisor: no heartbeat supplied - long runs may lose the lease")

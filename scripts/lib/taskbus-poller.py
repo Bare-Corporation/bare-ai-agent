@@ -1853,6 +1853,85 @@ def job_alive(uuid_str):
     return pid_alive(state.get("pid"))
 
 
+def proc_cmdline(pid):
+    """The command line of a live pid, or "" when it cannot be read.
+
+    Used only to confirm that a pid recorded in a job state file is still the
+    runner it claims to be. A recycled pid must never be signalled.
+    """
+    try:
+        with open("/proc/%d/cmdline" % int(pid), "rb") as fh:
+            raw = fh.read()
+    except (OSError, ValueError, TypeError):
+        return ""
+    return raw.replace(bytes([0]), b" ").decode("utf-8", "replace").strip()
+
+
+def local_runner_states_for_row(row_id):
+    """Job state records for this row, newest first.
+
+    A re-claim mints a NEW job uuid, so the predecessor is invisible from the new
+    uuid. Each state file records baserow_row_id, which is what makes it findable
+    by row at all.
+    """
+    found = []
+    try:
+        names = os.listdir(JOB_DIR)
+    except OSError:
+        return found
+    for name in names:
+        if not name.endswith(".json") or name.endswith(SNAPSHOT_SUFFIX):
+            continue
+        state = job_state(name[:-5])
+        if not state:
+            continue
+        if num(state, "baserow_row_id", -1) != int(row_id):
+            continue
+        found.append(state)
+    found.sort(key=lambda s: s.get("started_at") or "", reverse=True)
+    return found
+
+
+def reap_stale_local_runner(row_id):
+    """Kill a predecessor runner for THIS row that is still alive.
+
+    Reclaiming a row does not stop the previous child. Row 702 left a 1000 s
+    runner running beside the retry and both then wrote the same row.
+
+    Signalling is deliberately strict: the state must say running, the pid must be
+    alive, and its command line must name BOTH the local runner path and that
+    state's own uuid. Anything less and this returns without touching anything.
+
+    Returns a list of short descriptions, one per runner signalled.
+    """
+    import signal
+
+    reaped = []
+    for state in local_runner_states_for_row(row_id):
+        if state.get("status") != "running":
+            continue
+        pid = state.get("pid")
+        if not pid_alive(pid):
+            continue
+        uu = (state.get("uuid") or "").strip()
+        cmdline = proc_cmdline(pid)
+        if not uu or LOCAL_RUNNER not in cmdline or uu not in cmdline:
+            continue
+        signalled = False
+        try:
+            os.killpg(os.getpgid(int(pid)), signal.SIGTERM)
+            signalled = True
+        except (OSError, ValueError, TypeError):
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+                signalled = True
+            except (OSError, ValueError, TypeError):
+                signalled = False
+        if signalled:
+            reaped.append("pid %s (job %s)" % (pid, uu))
+    return reaped
+
+
 # -------------------------------------------------------------- completion guard
 
 def job_log_tail(uuid_str, limit=1500):
@@ -2880,7 +2959,9 @@ class Poller:
                         % (_sup_env, _shlex.quote(_remote_claim), _req, _env))
                 log("row %s: shipped claim payload (%d bytes) profile_required=%s"
                     % (rid, os.path.getsize(_local_claim), _req))
-            cmd = ("%ssetsid nohup bash %s %s python3 %s %s >/dev/null 2>&1 &"
+            # -u here too: the two dispatch paths must not disagree about how the
+            # runner buffers, or a fix on one leaves the other blind.
+            cmd = ("%ssetsid nohup bash %s %s python3 -u %s %s >/dev/null 2>&1 &"
                    % (_env, REMOTE_DISPATCHER, juuid, REMOTE_RUNNER, remote_pf))
             ok, out = ssh_node(node, cmd)
             if not ok:
@@ -2927,6 +3008,22 @@ class Poller:
         (setsid+nohup) and may not have opened it yet, so deleting it here would race
         the runner.
         """
+        # STOP THE PREDECESSOR FIRST. A re-claim mints a new job uuid, so the
+        # previous runner is not visible from this one; it is found by the row id
+        # its state file records. Without this, two runners write the same row
+        # (row 702: a 1000 s child still alive beside the retry).
+        try:
+            _stale = reap_stale_local_runner(rid)
+        except Exception as exc:                 # noqa: BLE001 - never block a dispatch
+            _stale = []
+            log("row %s: stale-runner reap FAILED (%s) - dispatching anyway"
+                % (rid, str(exc)[:160]), "WARN")
+        if _stale:
+            log("row %s: reaped %d stale runner(s) before dispatch: %s"
+                % (rid, len(_stale), ", ".join(_stale)), "WARN")
+            self.record("stale-runner-reaped", rid, ", ".join(_stale))
+        else:
+            log("row %s: no stale local runner for this row" % rid)
         # DEPTH AT DISPATCH TIME, not only at claim time. claim() refuses a row at or
         # beyond MAX_SPAWN_DEPTH, but the parent chain can be deepened BETWEEN the
         # claim and this spawn, and a self-target row is spawned from this process.
@@ -2965,8 +3062,10 @@ class Poller:
             log("cannot stage prompt for job %s: %s" % (juuid, e), "ERROR")
             self.record("dispatch-failed", rid, str(e)[:120])
             return
+        # -u: the runner must not block-buffer its own progress lines. A pass that
+        # is killed mid-flight (claim lost) otherwise leaves no trace in the log.
         cmd = ["setsid", "nohup", "bash", DISPATCHER, juuid,
-               "python3", LOCAL_RUNNER, pf]
+               "python3", "-u", LOCAL_RUNNER, pf]
         # A SELF-target job is still a task-bus job: it must receive the same criterion and
         # workspace the remote path ships, or the runner runs blind and the executor cannot
         # self-check. Missing this is why row 229 ran, did nothing, and still exited 0.

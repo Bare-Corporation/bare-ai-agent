@@ -448,19 +448,106 @@ def vault_api_key():
 _HEARTBEAT_KEY = {"key": ""}
 
 
-def _heartbeat_api_key():
-    """Return (key, source). Empty key means no credential; source says why."""
+AGENT_KEY_PATH_FILE = os.path.join(HOME, ".bare-ai", "config", "taskbus-agent-key.path")
+
+
+def _agent_key_secret_path():
+    """The Vault path holding THIS NODE's TaskBus agent key, or "".
+
+    Order: the untracked per-node path file, then AGENT_KEY_SECRET_PATH. There is
+    deliberately no built-in default, because the path contains the node id and
+    this is a public repository.
+    """
+    try:
+        with open(AGENT_KEY_PATH_FILE, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        pass
+    return (os.environ.get("AGENT_KEY_SECRET_PATH") or "").strip()
+
+
+AGENT_KEY_FIELDS = ("taskbus_api_key", "api_key")
+
+
+def _agent_key_field(payload):
+    """The agent key inside a Vault KV-v2 read body, or "" when there is none.
+
+    Field order matters: taskbus_api_key is what the per-node machine secret
+    carries (verified on a freshly provisioned node, 2026-11-19); api_key is the
+    older shape, kept so a node provisioned before the rename still boots. Nothing
+    else is ever accepted here - a provider credential in this slot is a
+    configuration fault, not a key to try anyway (row 702).
+    """
+    if not isinstance(payload, dict):
+        return ""
+    secret = payload.get("data")
+    if isinstance(secret, dict) and isinstance(secret.get("data"), dict):
+        secret = secret.get("data")
+    if not isinstance(secret, dict):
+        return ""
+    for field in AGENT_KEY_FIELDS:
+        value = secret.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _agent_api_key():
+    """(key, source) for this node's TaskBus AGENT key - a bck- key, NEVER a model key.
+
+    WHY THIS EXISTS (row 702): the heartbeat used vault_api_key(), which reads
+    model-credential.path - on this fleet that is a provider secret (sk-...). The
+    gateway answered 401 to every heartbeat, the lease was never extended, and the
+    row was re-claimed while attempt 1's child was still running.
+
+    A model credential is never acceptable here: if the resolved value does not
+    look like an agent key, that is a configuration fault, not a key to try anyway.
+    """
     env_key = (os.environ.get("TASKBUS_API_KEY") or "").strip()
     if env_key:
         return env_key, "env"
     if _HEARTBEAT_KEY["key"]:
         return _HEARTBEAT_KEY["key"], "vault-cached"
-    key, err = vault_api_key()
-    key = (key or "").strip()
+    path = _agent_key_secret_path()
+    if not path:
+        return "", ("no TaskBus agent key: set %s (or AGENT_KEY_SECRET_PATH) to this "
+                    "node's agent-key secret path" % AGENT_KEY_PATH_FILE)
+    cfg = load_env(VAULT_ENV)
+    addr = (cfg.get("VAULT_ADDR") or "").rstrip("/")
+    rid, sid = cfg.get("VAULT_ROLE_ID"), cfg.get("VAULT_SECRET_ID")
+    if not (addr and rid):
+        return "", "vault config incomplete (need VAULT_ADDR + VAULT_ROLE_ID)"
+    ctx = ssl.create_default_context(cafile=CA_FILE) if os.path.exists(CA_FILE) else None
+    try:
+        ident = {"role_id": rid}
+        if sid:
+            ident["secret_id"] = sid
+        login = urllib.request.Request(addr + "/v1/auth/approle/login",
+                                       data=json.dumps(ident).encode(), method="POST")
+        login.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(login, timeout=20, context=ctx) as resp:
+            token = (json.loads(resp.read()).get("auth") or {}).get("client_token")
+        if not token:
+            return "", "approle login returned no token"
+        read = urllib.request.Request(addr + "/v1/" + path)
+        read.add_header("X-Vault-Token", token)
+        with urllib.request.urlopen(read, timeout=20, context=ctx) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:                          # noqa: BLE001 - reported, not raised
+        return "", "agent-key fetch failed: %s" % str(exc)[:120]
+    key = _agent_key_field(data)
     if not key:
-        return "", err or "vault fetch returned no key"
+        return "", "agent-key secret has no taskbus_api_key or api_key field"
     _HEARTBEAT_KEY["key"] = key
     return key, "vault"
+
+
+def _heartbeat_api_key():
+    """The heartbeat credential: this node's TaskBus agent key, nothing else."""
+    return _agent_api_key()
 
 
 def _reset_heartbeat_api_key_cache():
@@ -967,6 +1054,16 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout,
     except OSError:
         task_body = task_text
 
+    # Set by on_lost the instant the claim stops being ours. Read by run_cli's
+    # drain watch so the child dies mid-pass, not at the next pass boundary -
+    # row 702 left a 1000 s child running beside a re-claim.
+    _lost = {"reason": ""}
+
+    def _on_claim_lost(reason):
+        _lost["reason"] = str(reason or "claim lost")
+        print("supervisor: claim LOST (%s) - killing the active child" % _lost["reason"],
+              flush=True)
+
     def run_cli(prompt_text, pass_no):
         prompt_file = os.path.join(workdir, ".taskbus-supervised-pass%d.prompt" % pass_no)
         with open(prompt_file, "w", encoding="utf-8") as fh:
@@ -979,11 +1076,16 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 start_new_session=True)
         try:
-            out, err = sup.drain_streams(proc)
-            try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
+            # watch makes the drain return the moment the claim is lost, so the
+            # kill below happens mid-stream instead of after the child exits.
+            out, err = sup.drain_streams(proc, watch=lambda: bool(_lost["reason"]))
+            if _lost["reason"]:
                 sup.terminate_process_group(proc)
+            else:
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    sup.terminate_process_group(proc)
         finally:
             if proc.poll() is None:
                 sup.terminate_process_group(proc)
@@ -1022,9 +1124,34 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout,
                                      headers={"X-API-Key": key, "X-Claim-Nonce": nonce,
                                               "Content-Type": "application/json",
                                               "User-Agent": "bare-ai-supervisor/1.0"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if resp.status != 200:
-                raise RuntimeError("heartbeat HTTP %s" % resp.status)
+        # One observable line per beat, flushed: a heartbeat that fails silently
+        # cannot be diagnosed from a log that never mentions it (row 702).
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                status = getattr(resp, "status", 200)
+                body = resp.read()[:400]
+        except urllib.error.HTTPError as exc:
+            excerpt = ""
+            try:
+                excerpt = exc.read().decode("utf-8", "replace")[:160]
+            except Exception:                        # noqa: BLE001
+                pass
+            print("supervisor: heartbeat row=%s status=%s url=%s error=%r"
+                  % (row_id, exc.code, url, excerpt), flush=True)
+            # 403/409/410 mean ownership or the nonce is gone: FATAL, act now.
+            raise sup.HeartbeatLost("heartbeat HTTP %s %s" % (exc.code, excerpt),
+                                    status=exc.code)
+        except Exception as exc:                     # noqa: BLE001 - transport/unknown
+            print("supervisor: heartbeat row=%s status=transport-error url=%s error=%r"
+                  % (row_id, url, str(exc)[:160]), flush=True)
+            raise sup.HeartbeatLost("heartbeat transport error: %s" % str(exc)[:160])
+        lease = ""
+        try:
+            lease = (json.loads(body or b"{}") or {}).get("lease_expires_at") or ""
+        except ValueError:
+            pass
+        print("supervisor: heartbeat row=%s status=%s url=%s lease_expires_at=%s"
+              % (row_id, status, url, lease or "<none>"), flush=True)
 
     have_nonce = bool((os.environ.get("TASKBUS_CLAIM_NONCE") or "").strip())
     print("supervisor: enabled row=%s state=%s criteria=%d depth=%d heartbeat=%s"
@@ -1043,8 +1170,9 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout,
         run_cli=run_cli, heartbeat_call=heartbeat_call if have_nonce else None,
         allowed_paths=_supervisor_allowed_paths(workdir), criteria=criteria,
         spawn_depth=spawn_depth, max_passes=max_passes,
+        on_lost=_on_claim_lost,
         max_execution_seconds=min(timeout * max(1, max_passes), sup.DEFAULT_MAX_EXECUTION_SECONDS),
-        reflect=reflect, log=lambda m: print(m))
+        reflect=reflect, log=lambda m: print(m, flush=True))
 
     print("SUPERVISOR_RESULT " + json.dumps({
         "outcome": result["outcome"], "reason": result["reason"],

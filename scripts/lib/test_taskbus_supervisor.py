@@ -231,6 +231,40 @@ class DrainStreamsTests(unittest.TestCase):
         self.assertIn(b"hi", out)
         self.assertEqual(err, b"")
 
+    def test_a_watch_interrupts_a_long_child(self):
+        # Row 702: a lost claim must kill the child MID-PASS. Without a watch the
+        # drain waits for the child to exit, which is how a 1000 s runner kept
+        # running beside the retry.
+        code = ("import sys, time; sys.stdout.write('early'); sys.stdout.flush(); "
+                "time.sleep(5.0); sys.stdout.write('late'); sys.stdout.flush()")
+        # start_new_session=True is REQUIRED here, not cosmetic: the test calls
+        # terminate_process_group, which killpg()s this child's process group. A
+        # child in the runner's own group would signal the test runner itself.
+        proc = subprocess.Popen([sys.executable, "-u", "-c", code],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+        started = time.monotonic()
+        out, _err = sup.drain_streams(proc, watch=lambda: True, poll_interval=0.05)
+        elapsed = time.monotonic() - started
+        sup.terminate_process_group(proc, grace=0.5, kill_wait=2.0)
+        self.assertLess(elapsed, 2.0)
+        self.assertNotIn(b"late", out)
+
+    def test_without_a_watch_the_child_is_drained_to_the_end(self):
+        # CONTROL for the case above: the fast return there is the WATCH, not the
+        # pumps. Here the same shape of child runs to completion and its final
+        # write is captured.
+        code = "import sys, time; time.sleep(1.0); sys.stdout.write('done')"
+        proc = subprocess.Popen([sys.executable, "-u", "-c", code],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL)
+        started = time.monotonic()
+        out, _err = sup.drain_streams(proc)
+        elapsed = time.monotonic() - started
+        proc.wait(timeout=30)
+        self.assertIn(b"done", out)
+        self.assertGreaterEqual(elapsed, 0.8)
+
 
 class HeartbeatTests(unittest.TestCase):
     def test_successful_beats(self):
@@ -253,6 +287,78 @@ class HeartbeatTests(unittest.TestCase):
         self.assertIn("ownership lost", hb.lost_reason)
         self.assertFalse(hb.alive)
         hb.stop()
+
+    def test_a_fatal_status_is_lost_on_the_first_beat(self):
+        # 409 means the nonce or the ownership is gone: retrying cannot help, so
+        # the run is declared lost without waiting for max_failures.
+        calls = []
+
+        def refuse():
+            calls.append(1)
+            raise sup.HeartbeatLost("heartbeat HTTP 409 stale nonce", status=409)
+
+        hb = sup.Heartbeat(0.02, refuse, max_failures=5).start()
+        deadline = time.time() + 3.0
+        while hb.lost_reason is None and time.time() < deadline:
+            time.sleep(0.02)
+        hb.stop()
+        self.assertIsNotNone(hb.lost_reason)
+        self.assertIn("409", hb.lost_reason)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_transient_status_retries_until_max_failures(self):
+        # CONTROL for the case above: the SAME exception class with a non-fatal
+        # status is retried, and is only declared lost on the third strike.
+        calls = []
+
+        def refuse():
+            calls.append(1)
+            raise sup.HeartbeatLost("heartbeat HTTP 503 unavailable", status=503)
+
+        hb = sup.Heartbeat(0.02, refuse, max_failures=3).start()
+        deadline = time.time() + 3.0
+        while hb.lost_reason is None and time.time() < deadline:
+            time.sleep(0.02)
+        hb.stop()
+        self.assertIsNotNone(hb.lost_reason)
+        self.assertEqual(len(calls), 3)
+
+    def test_a_transport_error_retries_until_max_failures(self):
+        # An error with no HTTP status at all is transient by construction.
+        calls = []
+
+        def refuse():
+            calls.append(1)
+            raise sup.HeartbeatLost("heartbeat transport error: timed out")
+
+        hb = sup.Heartbeat(0.02, refuse, max_failures=2).start()
+        deadline = time.time() + 3.0
+        while hb.lost_reason is None and time.time() < deadline:
+            time.sleep(0.02)
+        hb.stop()
+        self.assertIsNotNone(hb.lost_reason)
+        self.assertEqual(len(calls), 2)
+
+    def test_fatal_statuses_are_403_409_and_410(self):
+        for status in (403, 409, 410):
+            self.assertTrue(sup.HeartbeatLost("x", status=status).fatal)
+        for status in (401, 500, 503, None):
+            self.assertFalse(sup.HeartbeatLost("x", status=status).fatal)
+
+    def test_on_lost_fires_exactly_once_with_the_reason(self):
+        seen = []
+
+        def refuse():
+            raise sup.HeartbeatLost("heartbeat HTTP 410 gone", status=410)
+
+        hb = sup.Heartbeat(0.02, refuse, max_failures=5,
+                           on_lost=lambda reason: seen.append(reason)).start()
+        deadline = time.time() + 3.0
+        while hb.lost_reason is None and time.time() < deadline:
+            time.sleep(0.02)
+        hb.stop()
+        self.assertEqual(len(seen), 1)
+        self.assertIn("410", seen[0])
 
     def test_stop_before_start_is_safe(self):
         hb = sup.Heartbeat(0.05, lambda: None)

@@ -86,12 +86,12 @@ class SupervisorFlagTests(unittest.TestCase):
 
 
 class HeartbeatApiKeyTests(unittest.TestCase):
-    """The runner resolves its own heartbeat key: environment first, then Vault.
+    """The runner resolves its own TaskBus AGENT key, never a model credential.
 
     The poller no longer exports TASKBUS_API_KEY (it would be rendered into a
     remote ssh command line), so this resolver is what keeps the heartbeat alive
-    on a dispatched job. vault_api_key() is replaced with a counter so the tests
-    stay hermetic - no Vault, no network.
+    on a dispatched job. vault_api_key() reads the MODEL credential path and is
+    trapped to fail loudly, which keeps the tests hermetic and pins row 702.
     """
 
     @classmethod
@@ -99,67 +99,144 @@ class HeartbeatApiKeyTests(unittest.TestCase):
         cls.job = load_job()
 
     def setUp(self):
-        self._saved = os.environ.pop("TASKBUS_API_KEY", None)
+        self._saved = {k: os.environ.pop(k, None)
+                       for k in ("TASKBUS_API_KEY", "AGENT_KEY_SECRET_PATH")}
+        self._saved_path_file = self.job.AGENT_KEY_PATH_FILE
+        self.tmp = tempfile.mkdtemp(prefix="agent-key-")
+        # Point the path file at a location that does NOT exist, so the resolver
+        # cannot reach this node's real secret path during a test.
+        self.job.AGENT_KEY_PATH_FILE = os.path.join(self.tmp, "absent.path")
         self.job._reset_heartbeat_api_key_cache()
         self.calls = []
 
     def tearDown(self):
-        os.environ.pop("TASKBUS_API_KEY", None)
-        if self._saved is not None:
-            os.environ["TASKBUS_API_KEY"] = self._saved
+        for key, value in self._saved.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
+        self.job.AGENT_KEY_PATH_FILE = self._saved_path_file
         self.job._reset_heartbeat_api_key_cache()
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _stub_vault(self, key, err):
-        def fake():
-            self.calls.append(1)
-            return key, err
-        self.job.vault_api_key = fake
+    def _trap_model_credential(self):
+        """Any use of the MODEL credential path must fail the test loudly."""
+        def boom():
+            self.calls.append("model-credential")
+            raise AssertionError("vault_api_key() must never supply the heartbeat key")
+        self.job.vault_api_key = boom
 
-    def test_env_key_wins_and_vault_is_never_called(self):
-        os.environ["TASKBUS_API_KEY"] = "env-key"
-        self._stub_vault("vault-key", "vault")
+    def test_agent_key_comes_from_the_environment_first(self):
+        os.environ["TASKBUS_API_KEY"] = "bck-agent-key"
+        self._trap_model_credential()
         key, source = self.job._heartbeat_api_key()
-        self.assertEqual(key, "env-key")
+        self.assertEqual(key, "bck-agent-key")
         self.assertEqual(source, "env")
         self.assertEqual(self.calls, [])
 
-    def test_falls_back_to_vault_when_env_is_absent(self):
-        self._stub_vault("vault-key", "vault")
+    def test_the_model_credential_is_never_used(self):
+        # ROW 702: the heartbeat sent an sk- model key and got 401 on every beat.
+        # Control for the case above: with no agent key available the resolver must
+        # fail closed, not silently fall through to model-credential.path.
+        self._trap_model_credential()
         key, source = self.job._heartbeat_api_key()
-        self.assertEqual(key, "vault-key")
-        self.assertEqual(source, "vault")
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(key, "")
+        self.assertEqual(self.calls, [])
+        self.assertIn("agent key", source)
 
-    def test_vault_key_is_cached_for_the_life_of_the_process(self):
-        self._stub_vault("vault-key", "vault")
-        self.job._heartbeat_api_key()
-        key, source = self.job._heartbeat_api_key()
-        self.assertEqual(key, "vault-key")
-        self.assertEqual(source, "vault-cached")
-        self.assertEqual(len(self.calls), 1)
+    def test_the_path_file_supplies_the_secret_path(self):
+        path_file = os.path.join(self.tmp, "agent.key.path")
+        with open(path_file, "w", encoding="utf-8") as fh:
+            fh.write("# comment line" + chr(10))
+            fh.write("secret/data/example-node/agent-key" + chr(10))
+        self.job.AGENT_KEY_PATH_FILE = path_file
+        self.assertEqual(self.job._agent_key_secret_path(),
+                         "secret/data/example-node/agent-key")
+
+    def test_agent_key_secret_path_falls_back_to_the_environment(self):
+        os.environ["AGENT_KEY_SECRET_PATH"] = "secret/data/from-env/agent-key"
+        self.assertEqual(self.job._agent_key_secret_path(),
+                         "secret/data/from-env/agent-key")
 
     def test_a_failed_fetch_is_not_cached(self):
-        # A transient Vault 403 must not poison the rest of the job.
-        self._stub_vault(None, "vault secret-read HTTP 403")
+        # A failed fetch must not poison the rest of the job: with no path and no
+        # env the resolver reports the fault every time and caches nothing.
+        self._trap_model_credential()
+        self.job._heartbeat_api_key()
         key, source = self.job._heartbeat_api_key()
         self.assertEqual(key, "")
-        self.assertIn("403", source)
-        self.job._heartbeat_api_key()
-        self.assertEqual(len(self.calls), 2)
+        self.assertIn("agent key", source)
+        self.assertEqual(self.job._HEARTBEAT_KEY["key"], "")
 
-    def test_a_blank_vault_key_is_a_failure_not_a_credential(self):
-        self._stub_vault("   ", "vault")
-        key, _source = self.job._heartbeat_api_key()
-        self.assertEqual(key, "")
+    def test_a_cached_agent_key_is_reused(self):
+        self.job._HEARTBEAT_KEY["key"] = "bck-cached"
+        self._trap_model_credential()
+        key, source = self.job._heartbeat_api_key()
+        self.assertEqual(key, "bck-cached")
+        self.assertEqual(source, "vault-cached")
 
-    def test_heartbeat_call_uses_the_resolver(self):
-        # Guards the wiring: the closure must not read the env var directly, or the
-        # Vault fallback would never run on a dispatched job.
+    def test_heartbeat_call_uses_the_resolver_and_logs_every_beat(self):
+        # Guards the wiring: the closure must go through the resolver, and it must
+        # emit a flushed status line or a failed beat is invisible in the log.
         source = open(JOB, encoding="utf-8").read()
         start = source.index("def heartbeat_call():")
-        body = source[start:start + 1200]
+        body = source[start:start + 3000]
         self.assertIn("_heartbeat_api_key()", body)
         self.assertNotIn('os.environ.get("TASKBUS_API_KEY")', body)
+        self.assertIn("supervisor: heartbeat row=", body)
+        self.assertIn("flush=True", body)
+        self.assertIn("HeartbeatLost", body)
+
+
+class AgentKeyFieldTests(unittest.TestCase):
+    """Field resolution inside the per-node agent-key secret (row 702).
+
+    A freshly provisioned node stores the bck- key under taskbus_api_key; a node
+    provisioned before the rename stores it under api_key. Both must resolve,
+    taskbus_api_key first, and neither may be satisfied by any other field.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.job = load_job()
+
+    @staticmethod
+    def _kv(**fields):
+        return {"data": {"data": fields, "metadata": {}}}
+
+    def test_taskbus_api_key_is_read_from_the_kv_v2_envelope(self):
+        self.assertEqual(
+            self.job._agent_key_field(self._kv(taskbus_api_key="bck-new")),
+            "bck-new")
+
+    def test_the_legacy_api_key_field_still_resolves(self):
+        # A node provisioned before the rename must not go keyless on upgrade.
+        self.assertEqual(self.job._agent_key_field(self._kv(api_key="bck-old")),
+                         "bck-old")
+
+    def test_taskbus_api_key_wins_when_both_are_present(self):
+        self.assertEqual(
+            self.job._agent_key_field(self._kv(taskbus_api_key="bck-new",
+                                               api_key="bck-old")),
+            "bck-new")
+
+    def test_a_blank_taskbus_api_key_falls_through_to_api_key(self):
+        self.assertEqual(
+            self.job._agent_key_field(self._kv(taskbus_api_key="   ",
+                                               api_key="bck-old")),
+            "bck-old")
+
+    def test_neither_field_present_is_empty_not_a_credential(self):
+        # Negative control: a different secret in the same envelope must never be
+        # mistaken for an agent key.
+        self.assertEqual(
+            self.job._agent_key_field(self._kv(baserow_password="x")), "")
+
+    def test_a_non_dict_payload_is_empty(self):
+        self.assertEqual(self.job._agent_key_field(None), "")
+
+    def test_a_non_string_value_is_not_a_key(self):
+        self.assertEqual(
+            self.job._agent_key_field(self._kv(taskbus_api_key=12345)), "")
 
 
 # A real task-bus prompt envelope, as the poller writes it. The canary crashed on
@@ -360,7 +437,9 @@ class SupervisedChildEnvTests(unittest.TestCase):
                 return None
 
             @staticmethod
-            def drain_streams(proc):
+            def drain_streams(proc, **kwargs):
+                # run_cli passes watch= since row 702; a fake that refuses the
+                # kwarg would report a TypeError instead of testing the job.
                 return b"", b""
 
             @staticmethod
