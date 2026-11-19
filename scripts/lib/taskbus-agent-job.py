@@ -310,6 +310,37 @@ def vault_api_key():
         return None, "vault %s HTTP %s %s" % (stage, e.code, body)
     except Exception as e:
         return None, "%s: %s" % (type(e).__name__, str(e)[:80])
+
+
+# ---- heartbeat credential: environment first, then this node's Vault -------------
+# WHY this exists: the poller used to export TASKBUS_API_KEY into the supervisor env
+# prefix, which is rendered into the REMOTE ssh command line - so the key was visible
+# in ps on the target node. The key is no longer sent, and the job resolves its own
+# here, on the node that actually runs it. Cached because a heartbeat on a timer would
+# otherwise pay a full AppRole login plus secret read on every beat.
+_HEARTBEAT_KEY = {"key": ""}
+
+
+def _heartbeat_api_key():
+    """Return (key, source). Empty key means no credential; source says why."""
+    env_key = (os.environ.get("TASKBUS_API_KEY") or "").strip()
+    if env_key:
+        return env_key, "env"
+    if _HEARTBEAT_KEY["key"]:
+        return _HEARTBEAT_KEY["key"], "vault-cached"
+    key, err = vault_api_key()
+    key = (key or "").strip()
+    if not key:
+        return "", err or "vault fetch returned no key"
+    _HEARTBEAT_KEY["key"] = key
+    return key, "vault"
+
+
+def _reset_heartbeat_api_key_cache():
+    """Forget the cached key. Test seam; also the hook for a forced re-read."""
+    _HEARTBEAT_KEY["key"] = ""
+
+
 CLI = os.path.join(HOME, "bare-ai-cli", "bundle", "bare-ai.js")
 # Node path FIXED 2026-09-14: was hardcoded to /usr/local/bin/node, which does not exist
 # on nodes that ship node at /usr/bin/node), so jobs dispatched to those nodes died
@@ -805,9 +836,14 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout):
         base = (os.environ.get("TASKBUS_API_BASE") or "").rstrip("/")
         if not base:
             raise RuntimeError("no TASKBUS_API_BASE supplied")
-        key = (os.environ.get("TASKBUS_API_KEY") or "").strip()
+        key, key_source = _heartbeat_api_key()
         if not key:
-            raise RuntimeError("no TASKBUS_API_KEY supplied")
+            raise RuntimeError("no heartbeat credential: TASKBUS_API_KEY is unset and "
+                               "the Vault fetch failed (%s)" % key_source)
+        if key_source == "vault":
+            # Once per process, because the key is cached after this. Never the key
+            # itself - this line goes to the job log and is copied into the row.
+            print("supervisor: heartbeat credential sourced from Vault on this node")
         url = "%s/v1/taskbus/rows/%s/heartbeat" % (base, row_id)
         req = urllib.request.Request(url, data=b"{}", method="POST",
                                      headers={"X-API-Key": key, "X-Claim-Nonce": nonce,

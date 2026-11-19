@@ -1067,7 +1067,9 @@ def client_credential_status():
 # legacy dispatch/close behaviour is unchanged. The bridge exists because the
 # runner subprocess needs three things the poller holds and it does not: the
 # claim nonce (to authenticate heartbeats), the row id (to name its state file)
-# and the agent key plus gateway base (to reach the heartbeat route).
+# and the gateway base (to address the heartbeat route). The agent KEY is
+# deliberately NOT forwarded - see supervisor_env_map - so the runner fetches its
+# own from the Vault on the node where it actually runs.
 
 SUPERVISOR_RESULT_PREFIX = "SUPERVISOR_RESULT "
 TASKBUS_API_BASE = os.environ.get("TASKBUS_API_BASE", "").strip().rstrip("/")
@@ -1088,10 +1090,16 @@ def supervisor_env_map(claim, row_id, api_key=None, api_base=None):
         out["TASKBUS_CLAIM_NONCE"] = nonce
     if row_id not in (None, ""):
         out["TASKBUS_ROW_ID"] = str(row_id)
-    key = str(api_key or "").strip()
-    if key:
-        out["TASKBUS_API_KEY"] = key
-    base = str(api_base or TASKBUS_API_BASE).strip().rstrip("/")
+    # The key is deliberately NOT exported any more: supervisor_env_prefix renders
+    # this map into a REMOTE ssh command line, so a key placed here is visible in
+    # ps on the target node. The runner resolves its own key from Vault instead
+    # (taskbus-agent-job.py _heartbeat_api_key). api_key stays in the signature so
+    # existing callers keep working, but it is unused on purpose.
+    del api_key
+    # GATEWAY_BASE is the same per-node setting under its other name, and it is the
+    # one a gateway-only worker is told to set. Without the fallback a worker that
+    # configures only TASKBUS_GATEWAY_BASE dispatched jobs with no heartbeat base.
+    base = str(api_base or TASKBUS_API_BASE or GATEWAY_BASE).strip().rstrip("/")
     if base:
         out["TASKBUS_API_BASE"] = base
     return out
@@ -1142,15 +1150,15 @@ def supervisor_close_body(parsed, log_excerpt=""):
 
 
 def supervisor_env_for_claim(claim, row_id):
-    """Convenience wrapper that sources the agent key, tolerating its absence."""
+    """Environment for one claim. The runner sources its own key, so none is sent.
+
+    This used to fetch the agent key and pass it in, purely so it could be exported.
+    Nothing consumes it now, and a failed fetch logged "heartbeat will be off" -
+    which is no longer what happens: the heartbeat is gated on the nonce only.
+    """
     if not supervisor_enabled():
         return {}
-    key = ""
-    try:
-        key = agent_api_key()
-    except Exception as exc:                          # noqa: BLE001 - key is optional here
-        log("supervisor bridge: no agent key (%s) - heartbeat will be off" % str(exc)[:80])
-    return supervisor_env_map(claim, row_id, api_key=key)
+    return supervisor_env_map(claim, row_id)
 
 
 def _gw_request(path, method="GET", body=None, nonce=None, timeout=30,

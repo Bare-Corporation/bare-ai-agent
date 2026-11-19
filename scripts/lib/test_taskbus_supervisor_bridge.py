@@ -57,7 +57,11 @@ class SupervisorBridgeTests(unittest.TestCase):
         self.assertEqual(env["TASKBUS_SUPERVISOR"], "1")
         self.assertEqual(env["TASKBUS_CLAIM_NONCE"], "n-123")
         self.assertEqual(env["TASKBUS_ROW_ID"], "691")
-        self.assertEqual(env["TASKBUS_API_KEY"], "bck-key")
+        # The key is deliberately NOT exported: supervisor_env_prefix turns this map
+        # into a REMOTE ssh command line, where a key would be visible in ps on the
+        # target node. The runner sources its own instead.
+        self.assertNotIn("TASKBUS_API_KEY", env)
+        self.assertNotIn("bck-key", repr(env))
         self.assertEqual(env["TASKBUS_API_BASE"], "http://gw:80")
 
     def test_flag_on_omits_missing_nonce(self):
@@ -72,6 +76,71 @@ class SupervisorBridgeTests(unittest.TestCase):
         self.assertTrue(prefix.startswith("A=1 B="))
         self.assertIn("'two words'", prefix)
         self.assertTrue(prefix.endswith(" "))
+
+    # ---- the agent key must never be exported --------------------------
+    def test_env_map_never_carries_the_api_key(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self.p.supervisor_env_map({"nonce": "n-1"}, 12, api_key="bck-secret-value")
+        self.assertNotIn("TASKBUS_API_KEY", env)
+        self.assertNotIn("bck-secret-value", repr(env))
+
+    def test_prefix_never_carries_the_api_key(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self.p.supervisor_env_map({"nonce": "n-1"}, 12, api_key="bck-secret-value")
+        prefix = self.p.supervisor_env_prefix(env)
+        self.assertNotIn("TASKBUS_API_KEY", prefix)
+        self.assertNotIn("bck-secret-value", prefix)
+        # Control: the prefix is not empty, so the assertions above mean something.
+        self.assertIn("TASKBUS_CLAIM_NONCE=n-1", prefix)
+
+    def test_env_for_claim_never_carries_the_api_key(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self.p.supervisor_env_for_claim({"nonce": "n-2"}, 13)
+        self.assertNotIn("TASKBUS_API_KEY", env)
+        self.assertEqual(env["TASKBUS_CLAIM_NONCE"], "n-2")
+
+    # ---- TASKBUS_API_BASE resolves from TASKBUS_GATEWAY_BASE -----------
+    # The module constants are read at import, so they are patched on the module
+    # rather than through the environment: that is the only way to simulate a
+    # process that started with TASKBUS_API_BASE unset.
+    def _with_bases(self, api_base, gateway_base, fn):
+        saved = (self.p.TASKBUS_API_BASE, self.p.GATEWAY_BASE)
+        try:
+            self.p.TASKBUS_API_BASE = api_base
+            self.p.GATEWAY_BASE = gateway_base
+            return fn()
+        finally:
+            self.p.TASKBUS_API_BASE, self.p.GATEWAY_BASE = saved
+
+    def test_api_base_falls_back_to_gateway_base(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self._with_bases(
+            "", "http://gw-fallback:9000/",
+            lambda: self.p.supervisor_env_map({"nonce": "n-3"}, 14))
+        self.assertEqual(env["TASKBUS_API_BASE"], "http://gw-fallback:9000")
+
+    def test_api_base_prefers_taskbus_api_base_over_gateway_base(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self._with_bases(
+            "http://api-base:81", "http://gw-fallback:9000",
+            lambda: self.p.supervisor_env_map({"nonce": "n-4"}, 15))
+        self.assertEqual(env["TASKBUS_API_BASE"], "http://api-base:81")
+
+    def test_api_base_prefers_an_explicit_argument_over_both(self):
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self._with_bases(
+            "http://api-base:81", "http://gw-fallback:9000",
+            lambda: self.p.supervisor_env_map({"nonce": "n-5"}, 16,
+                                              api_base="http://arg:82"))
+        self.assertEqual(env["TASKBUS_API_BASE"], "http://arg:82")
+
+    def test_api_base_omitted_when_no_source_is_set(self):
+        # Control for the fallback: with all three unset there is no base at all.
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        env = self._with_bases(
+            "", "",
+            lambda: self.p.supervisor_env_map({"nonce": "n-6"}, 17))
+        self.assertNotIn("TASKBUS_API_BASE", env)
 
     # ---- SUPERVISOR_RESULT parsing -------------------------------------
     def test_parses_envelope_amid_noise(self):
