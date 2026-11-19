@@ -3015,6 +3015,21 @@ class Poller:
         else:
             status_target = "Blocked"
             head = "job FAILED (exit_code=%s)" % state.get("exit_code")
+        # STAGE 0 SUPERVISOR (flag-gated): a SUPERVISOR_RESULT envelope from the
+        # runner decides the close body. Absent the envelope - or with
+        # TASKBUS_SUPERVISOR unset - status_target/head above stand and the
+        # legacy close path runs unchanged.
+        if supervisor_enabled():
+            _sup = supervisor_close_body(parse_supervisor_result(tail),
+                                         log_excerpt=tail)
+            if _sup:
+                log("row %s: supervisor envelope decided the close (%s)"
+                    % (rid, _sup["status"]))
+                head = _sup["machines_response"]
+                status_target = _sup["status"]
+                if _sup.get("re_opened_or_retry_reason"):
+                    attest = dict(attest)
+                    attest["re_opened_or_retry_reason"] = _sup["re_opened_or_retry_reason"]
         note = append_note(fresh.get("machines_response"),
                            head + "\n--- executor output (tail) ---\n" + tail)
         payload = {"status": status_target, "machines_response": note}
