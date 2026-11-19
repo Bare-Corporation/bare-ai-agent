@@ -1113,6 +1113,33 @@ def spawn_depth_allows(depth):
     return sup.spawn_depth_guard(depth)
 
 
+def row_model_catalog(row):
+    """The stamped model from a row's model_catalog field, as a plain string.
+
+    WHAT THE FIELD IS: a Baserow link, so it arrives as
+    [{"id": 38, "value": "deepseek-v4-flash"}]. The VALUE is the model; the id is
+    the link row's own id and is useless for routing. A bare string or a single
+    dict are both tolerated, and anything unusable yields "" rather than guessing.
+
+    WHY IT IS READ FROM THE ROW: the verified execution_profile's execution_config
+    holds only policy knobs (routing_strategy, exclude_providers, ceiling,
+    max_attempts, require_human_review, role_alias, role hash). The model a row was
+    dispatched on is stamped on the row itself - row 698 proved it.
+    """
+    raw = (row or {}).get("model_catalog")
+    if raw is None:
+        return ""
+    items = raw if isinstance(raw, list) else [raw]
+    for item in items:
+        if isinstance(item, dict):
+            value = item.get("value") or item.get("shortcut") or item.get("model_id")
+            if value not in (None, ""):
+                return str(value).strip()
+        elif item not in (None, ""):
+            return str(item).strip()
+    return ""
+
+
 def supervisor_env_map(claim, row_id, api_key=None, api_base=None, spawn_depth=None):
     """Environment additions for the runner. Empty dict when the flag is off."""
     if not supervisor_enabled():
@@ -2785,8 +2812,14 @@ class Poller:
                 _env += "TASKBUS_CRITERION_JSON=%s " % _shlex.quote(json.dumps(_parsed))
             if _cwd:
                 _env += "TASKBUS_JOB_CWD=%s " % _shlex.quote(_cwd)
-            log("row %s: shipping %d criterion check(s) + cwd=%s to the runner"
-                % (rid, len(_parsed), _cwd))
+            # The model is stamped on the ROW, not in the profile snapshot. Ship it
+            # so the runner can resolve the route its verified profile is meant to
+            # use instead of falling back to the node's own profile.env.
+            _row_model = row_model_catalog(row)
+            if _row_model:
+                _env += "TASKBUS_ROW_MODEL=%s " % _shlex.quote(_row_model)
+            log("row %s: shipping %d criterion check(s) + cwd=%s + model=%s to the runner"
+                % (rid, len(_parsed), _cwd, _row_model or "<none>"))
             # 2026-11-09 (T4): ship the claim payload the runner must verify. The file
             # travels by scp like the prompt does, so the child never needs Baserow
             # credentials of its own and a long payload cannot be argv-mangled.
@@ -2897,6 +2930,12 @@ class Poller:
         _cwd = _cwd.strip() if isinstance(_cwd, str) else ""
         if _cwd:
             env["TASKBUS_JOB_CWD"] = _cwd
+        # Same row-stamped model as the remote path: a SELF-target job must resolve
+        # the same route a remote one would, or the two disagree about which model
+        # the profile picked.
+        _row_model = row_model_catalog(row)
+        if _row_model:
+            env["TASKBUS_ROW_MODEL"] = _row_model
         # 2026-11-09 (T4): the self path needs the same claim payload the remote path
         # ships, or a self-target job would run with the gate inert.
         _claim = getattr(self.bus, "last_claim", None)

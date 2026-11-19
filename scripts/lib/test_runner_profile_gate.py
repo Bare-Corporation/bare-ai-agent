@@ -258,5 +258,109 @@ class ProfileRoutePrecedenceTests(unittest.TestCase):
         self.assertIn("ROUTER WARNING", self.out)
 
 
+class RowStampedModelRouteTests(unittest.TestCase):
+    """Row 698: the model is stamped on the ROW, not inside the snapshot.
+
+    .16's verified Execution Profile carried only policy knobs in execution_config
+    (routing_strategy, exclude_providers, ceiling, max_attempts,
+    require_human_review, role_alias, role hash), so profile_route() found nothing
+    and ~/.bare-ai/profile.env won again - a DeepSeek key posted to Anthropic. The
+    poller now exports the row's model_catalog as TASKBUS_ROW_MODEL and the runner
+    resolves the catalogue route from it.
+    """
+
+    PROFILE_ENV = {"BARE_AI_ENDPOINT": "https://api.anthropic.com/v1/messages",
+                   "BARE_AI_MODEL": "claude-sonnet-4-6"}
+    # The shape .4 measured on the live row 698 claim payload.
+    VERIFIED_CTX_NO_ROUTE = {
+        "verified": True,
+        "slug": "canary-profile",
+        "version": 2,
+        "route": None,
+        "router": {"routing_strategy": "cheapest_flash", "exclude_providers": []},
+    }
+    CATALOGUE = [{"shortcut": "38", "model_id": "deepseek-v4-flash|deepseek-cn",
+                  "base_url": "https://api.deepseek.com"}]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.job = load_runner()
+
+    def setUp(self):
+        self._real_central = self.job._central_models
+        self.out = ""
+
+    def tearDown(self):
+        self.job._central_models = self._real_central
+
+    def _catalogue(self, models):
+        self.job._central_models = lambda: ({"models": models}, "")
+
+    def _run(self, ctx, env, row_model=None):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = self.job.apply_profile_route(ctx, env, row_model=row_model)
+        self.out = buf.getvalue()
+        return result
+
+    def test_row_model_resolves_when_the_snapshot_has_no_route(self):
+        self._catalogue(self.CATALOGUE)
+        env = dict(self.PROFILE_ENV)
+        applied = self._run(self.VERIFIED_CTX_NO_ROUTE, env, row_model="deepseek-v4-flash")
+        self.assertEqual(env["BARE_AI_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.deepseek.com/v1/chat/completions")
+        self.assertIn("route source = execution_profile", self.out)
+        self.assertIn("row.model_catalog", self.out)
+        self.assertIn("overrode the node profile", self.out)
+        self.assertEqual(applied["model"], "deepseek-v4-flash")
+
+    def test_row_model_accepts_the_piped_catalogue_form(self):
+        # The catalogue lists the pipe form; the row may carry either.
+        self._catalogue(self.CATALOGUE)
+        env = dict(self.PROFILE_ENV)
+        self._run(self.VERIFIED_CTX_NO_ROUTE, env, row_model="deepseek-v4-flash|deepseek-cn")
+        self.assertEqual(env["BARE_AI_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.deepseek.com/v1/chat/completions")
+
+    def test_snapshot_route_still_outranks_the_row_model(self):
+        self._catalogue(self.CATALOGUE)
+        ctx = dict(self.VERIFIED_CTX_NO_ROUTE)
+        ctx["route"] = {"model_id": "qwen2.5-coder",
+                        "base_url": "https://api.example.com/v1",
+                        "source": "execution_config.routed_model"}
+        env = dict(self.PROFILE_ENV)
+        self._run(ctx, env, row_model="deepseek-v4-flash")
+        self.assertEqual(env["BARE_AI_MODEL"], "qwen2.5-coder")
+        self.assertEqual(env["BARE_AI_ENDPOINT"],
+                         "https://api.example.com/v1/chat/completions")
+
+    def test_unverified_context_does_not_use_the_row_model(self):
+        # Control: an unverified row value must not overrule local configuration.
+        self._catalogue(self.CATALOGUE)
+        env = dict(self.PROFILE_ENV)
+        ctx = dict(self.VERIFIED_CTX_NO_ROUTE)
+        ctx["verified"] = False
+        self.assertIsNone(self._run(ctx, env, row_model="deepseek-v4-flash"))
+        self.assertEqual(env["BARE_AI_MODEL"], "claude-sonnet-4-6")
+
+    def test_no_verified_profile_does_not_use_the_row_model(self):
+        # Control: no snapshot at all means profile.env is authoritative.
+        self._catalogue(self.CATALOGUE)
+        env = dict(self.PROFILE_ENV)
+        self.assertIsNone(self._run(None, env, row_model="deepseek-v4-flash"))
+        self.assertEqual(env["BARE_AI_MODEL"], "claude-sonnet-4-6")
+        self.assertEqual(self.out, "")
+
+    def test_an_unknown_row_model_leaves_the_profile_alone(self):
+        self._catalogue([])                      # the row's model is not in the list
+        env = dict(self.PROFILE_ENV)
+        self.assertIsNone(self._run(self.VERIFIED_CTX_NO_ROUTE, env,
+                                    row_model="not-in-the-list"))
+        self.assertEqual(env["BARE_AI_MODEL"], "claude-sonnet-4-6")
+        self.assertIn("ROUTER WARNING", self.out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

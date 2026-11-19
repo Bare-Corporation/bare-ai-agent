@@ -215,7 +215,7 @@ def catalogue_route_for_model(model_id):
     return None, None, "model %s not present in the central list" % want
 
 
-def apply_profile_route(ctx, env):
+def apply_profile_route(ctx, env, row_model=None):
     """Make a VERIFIED snapshot's route authoritative over the node profile.
 
     WHY (row 697): .16's snapshot routed deepseek-v4-flash|deepseek-cn while
@@ -225,21 +225,42 @@ def apply_profile_route(ctx, env):
     the row runs on; the node profile only fills in when the snapshot names no
     route at all.
 
-    Returns the applied route dict, or None when the snapshot names no usable
-    route - in which case the caller's profile/catalogue decision stands.
+    WHERE THE ROUTE COMES FROM, in this order:
+      1. the verified snapshot itself (execution_config / snapshot), via
+         profile_context.profile_route();
+      2. the ROW's stamped model_catalog, exported by the poller as
+         TASKBUS_ROW_MODEL. Row 698 proved this is where the model actually is:
+         execution_config carries only policy knobs (routing_strategy,
+         exclude_providers, ceiling, max_attempts, require_human_review,
+         role_alias, role hash), so the snapshot path found nothing and profile.env
+         won again - a DeepSeek key was posted to Anthropic.
+    The row model is used ONLY when the profile is VERIFIED, because an unverified
+    row value must not get to overrule local configuration.
+
+    Returns the applied route dict, or None when nothing usable was found - in
+    which case the caller's profile/catalogue decision stands.
     """
     route = (ctx or {}).get("route") or None
-    if not route:
+    row_value = str(row_model or "").strip()
+    if route:
+        model = str(route.get("model_id") or "").strip()
+        base = str(route.get("base_url") or "").strip()
+        source = str(route.get("source") or "execution_profile")
+    elif row_value and isinstance(ctx, dict) and ctx.get("verified") is True:
+        model, base, source = row_value, "", "row.model_catalog"
+    else:
         return None
-    model = str(route.get("model_id") or "").strip()
-    base = str(route.get("base_url") or "").strip()
-    source = str(route.get("source") or "execution_profile")
     if not model and not base:
         return None
     if base:
         endpoint, resolved, note = _completions_url(base), _model_core(model), source
     else:
         endpoint, resolved, note = catalogue_route_for_model(model)
+        if source != "execution_profile":
+            # Keep the provenance: the catalogue note says how it resolved, not
+            # where the model came from, and "row.model_catalog" is the part an
+            # operator needs when the profile and the row disagree.
+            note = "%s via %s" % (note, source)
     if not endpoint or not resolved:
         print("target-job: ROUTER WARNING execution_profile route %r could not be "
               "resolved (%s) - the node profile route stands" % (model, note))
@@ -1146,10 +1167,12 @@ def main():
     if profile.get("BARE_AI_ENDPOINT"):
         print("target-job: route source = node profile (%s) model=%s"
               % (profile.get("BARE_AI_PROFILE") or "?", env.get("BARE_AI_MODEL")))
-    # 1b. A VERIFIED execution_profile route OUTRANKS the node profile (row 697).
-    #     Applied here, before the catalogue block, so the catalogue is skipped when
-    #     the snapshot named a route - which is what made the profile win before.
-    _profile_route = apply_profile_route(_snap_ctx, env)
+    # 1b. A VERIFIED execution_profile route OUTRANKS the node profile (rows 697,
+    #     698). The route comes from the snapshot when it carries one, otherwise from
+    #     the model the poller stamped on the row (TASKBUS_ROW_MODEL). Applied here,
+    #     before the catalogue block, so the catalogue is skipped once a route is set.
+    _profile_route = apply_profile_route(_snap_ctx, env,
+                                        row_model=os.environ.get("TASKBUS_ROW_MODEL", ""))
     if env.get("BARE_AI_API_KEY"):
         print("target-job: credential source = node profile/model-credentials.env")
 

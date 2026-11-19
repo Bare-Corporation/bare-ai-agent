@@ -221,5 +221,32 @@ class SpawnDepthGuardTests(unittest.TestCase):
         self.assertNotIn("Blocked", statuses)
 
 
+class RowModelCatalogTests(unittest.TestCase):
+    """The row's stamped model_catalog, in every shape it can arrive (row 698)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load_poller()
+
+    def test_link_list_returns_the_value_not_the_id(self):
+        row = {"model_catalog": [{"id": 38, "value": "deepseek-v4-flash"}]}
+        self.assertEqual(self.m.row_model_catalog(row), "deepseek-v4-flash")
+
+    def test_bare_string(self):
+        self.assertEqual(self.m.row_model_catalog({"model_catalog": "deepseek-v4-flash"}),
+                         "deepseek-v4-flash")
+
+    def test_single_dict(self):
+        self.assertEqual(self.m.row_model_catalog({"model_catalog": {"id": 38, "value": "m1"}}),
+                         "m1")
+
+    def test_unusable_shapes_yield_empty(self):
+        self.assertEqual(self.m.row_model_catalog({}), "")
+        self.assertEqual(self.m.row_model_catalog({"model_catalog": None}), "")
+        self.assertEqual(self.m.row_model_catalog({"model_catalog": []}), "")
+        self.assertEqual(self.m.row_model_catalog({"model_catalog": [{"id": 38}]}), "")
+        self.assertEqual(self.m.row_model_catalog(None), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
