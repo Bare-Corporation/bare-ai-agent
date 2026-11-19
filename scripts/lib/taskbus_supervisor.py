@@ -490,3 +490,150 @@ def reflect_to_role_diary(role_path, diary_path, findings, max_chars=4000,
         except OSError:
             continue
     return wrote
+
+
+def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=None,
+                        allowed_paths=None, criteria=None, spawn_depth=0,
+                        lease_seconds=DEFAULT_LEASE_SECONDS, heartbeat_interval=None,
+                        max_passes=DEFAULT_MAX_PASSES,
+                        max_tool_iterations=DEFAULT_MAX_TOOL_ITERATIONS,
+                        max_execution_seconds=DEFAULT_MAX_EXECUTION_SECONDS,
+                        clock=time.monotonic, reflect=None, log=None):
+    """Drive a supervised multi-pass run. Returns a result dict.
+
+    All side effects are injected so the loop itself is testable:
+      run_cli(prompt_text, pass_no) -> dict with exit_code, stdout, stderr,
+          session_id, and optionally evidence [{criterion, evidence}] and blocked
+      heartbeat_call() -> performs one heartbeat, raising on refusal
+      reflect(findings_text) -> bounded reflection, return value ignored
+
+    Outcomes: verified | blocked | budget_exhausted | lost | depth_refused | error.
+    Nothing here ever decides Completed - the caller reports HumanReviewNeeded.
+    """
+    def emit(message):
+        if log:
+            log(message)
+
+    ok, reason = spawn_depth_guard(spawn_depth)
+    if not ok:
+        return {"outcome": "depth_refused", "reason": reason, "passes": 0, "state": None}
+
+    if max_execution_seconds > DEFAULT_MAX_EXECUTION_SECONDS:
+        max_execution_seconds = DEFAULT_MAX_EXECUTION_SECONDS
+
+    store = StateFile(state_path, row_id=row_id, spawn_depth=spawn_depth)
+    state = store.load()
+    StateFile.register_criteria(state, criteria or [])
+    store.save(state)
+
+    heartbeat = None
+    if heartbeat_call is not None:
+        interval = heartbeat_interval if heartbeat_interval else max(1.0, lease_seconds / 3.0)
+        heartbeat = Heartbeat(interval, heartbeat_call).start()
+        emit("supervisor: heartbeat every %.1fs" % interval)
+    else:
+        emit("supervisor: no heartbeat supplied - long runs may lose the lease")
+
+    started = clock()
+    outcome = "budget_exhausted"
+    outcome_reason = ""
+    passes_done = 0
+
+    try:
+        for pass_no in range(1, int(max_passes) + 1):
+            if heartbeat is not None and heartbeat.lost_reason:
+                outcome = "lost"
+                outcome_reason = "heartbeat lost: " + heartbeat.lost_reason
+                break
+            elapsed = clock() - started
+            if elapsed >= max_execution_seconds:
+                outcome = "budget_exhausted"
+                outcome_reason = "max_execution_seconds %d reached after %.0fs" % (
+                    max_execution_seconds, elapsed)
+                break
+
+            prompt = task_text + "\n\n" + StateFile.render_brief(state)
+            try:
+                result = run_cli(prompt, pass_no) or {}
+            except Exception as exc:                    # noqa: BLE001 - a crash is a failed pass
+                result = {"exit_code": -1, "stdout": "", "stderr": str(exc)}
+
+            passes_done = pass_no
+            exit_code = int(result.get("exit_code", -1))
+            stdout = result.get("stdout") or ""
+            response = ""
+            session_id = result.get("session_id")
+            tools = result.get("tools") or {}
+            if not session_id:
+                try:
+                    envelope = parse_cli_json(stdout)
+                    response = envelope.get("response") or ""
+                    session_id = envelope.get("session_id")
+                    tools = (envelope.get("stats") or {}).get("tools") or tools
+                except CliOutputError as exc:
+                    emit("supervisor: pass %d produced no parseable JSON: %s" % (pass_no, exc))
+
+            StateFile.record_pass(state, pass_no, exit_code, session_id, response, tools)
+            for item in result.get("evidence") or []:
+                try:
+                    StateFile.add_evidence(state, item.get("criterion"), item.get("evidence"))
+                except SupervisorError as exc:
+                    emit("supervisor: rejected evidence on pass %d: %s" % (pass_no, exc))
+            if result.get("blocked"):
+                state["blocked_reason"] = str(result["blocked"])
+            elif BLOCKED_PREFIX in response:
+                state["blocked_reason"] = response.split(BLOCKED_PREFIX, 1)[1].strip()[:500]
+            store.save(state)
+
+            violations = enforce_allowed_paths(result.get("changed_paths") or [], allowed_paths)
+            if violations:
+                state["blocked_reason"] = "path violation: " + "; ".join(
+                    v["path"] + " (" + v["reason"] + ")" for v in violations[:3])
+                store.save(state)
+                outcome = "blocked"
+                outcome_reason = state["blocked_reason"]
+                break
+
+            if state.get("blocked_reason"):
+                outcome = "blocked"
+                outcome_reason = state["blocked_reason"]
+                break
+
+            if StateFile.all_criteria_evidenced(state):
+                outcome = "verified"
+                outcome_reason = "all criteria evidenced"
+                break
+
+            emit("supervisor: pass %d incomplete - criteria still pending" % pass_no)
+        else:
+            outcome = "budget_exhausted"
+            outcome_reason = "max_passes %d exhausted" % int(max_passes)
+    finally:
+        if heartbeat is not None:
+            heartbeat.stop()
+
+    if outcome == "verified" and reflect is not None:
+        try:
+            reflect(_reflection_text(state))
+        except Exception as exc:                        # noqa: BLE001 - never invalidate the run
+            emit("supervisor: reflection failed (ignored): %s" % exc)
+
+    state["outcome"] = outcome
+    try:
+        store.save(state)
+    except SupervisorError as exc:
+        emit("supervisor: could not persist final state: %s" % exc)
+    return {"outcome": outcome, "reason": outcome_reason,
+            "passes": passes_done, "state": state, "state_path": state_path}
+
+
+def _reflection_text(state):
+    """Only verified, evidenced lines are worth persisting."""
+    lines = ["Outcome: %s (row %s, %d pass(es))" % (
+        state.get("outcome"), state.get("row_id"), len(state.get("passes") or []))]
+    for item in state.get("criteria") or []:
+        if item.get("status") == "evidenced":
+            lines.append("- %s: %s" % (item.get("criterion"), "; ".join(item.get("evidence") or [])))
+    if state.get("blocked_reason"):
+        lines.append("- blocked: %s" % state["blocked_reason"])
+    return "\n".join(lines)

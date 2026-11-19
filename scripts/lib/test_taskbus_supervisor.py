@@ -367,3 +367,165 @@ class ReflectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class SupervisedLoopTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="suploop-")
+        self.state_path = os.path.join(self.dir, ".taskbus-state-7.json")
+        self.logs = []
+
+    def tearDown(self):
+        for name in os.listdir(self.dir):
+            try:
+                os.unlink(os.path.join(self.dir, name))
+            except OSError:
+                pass
+        os.rmdir(self.dir)
+
+    def _cli(self, evidence_by_pass, response="working", session="sid", failed=False):
+        def run_cli(prompt, pass_no):
+            self.assertIn("SUPERVISOR STATE", prompt)
+            return {
+                "exit_code": 1 if failed else 0,
+                "stdout": "preamble line\n" + json.dumps({"session_id": session, "response": response}),
+                "stderr": "",
+                "evidence": evidence_by_pass.get(pass_no, []),
+            }
+        return run_cli
+
+    def test_verified_when_evidence_complete(self):
+        result = sup.run_supervised_loop(
+            7, "do the thing", self.state_path,
+            run_cli=self._cli({1: [{"criterion": "build", "evidence": "npm test green"}]}),
+            criteria=["build"], log=self.logs.append)
+        self.assertEqual(result["outcome"], "verified")
+        self.assertEqual(result["passes"], 1)
+        self.assertTrue(sup.StateFile.all_criteria_evidenced(result["state"]))
+
+    def test_second_pass_completes_remaining_criteria(self):
+        evidence = {2: [{"criterion": "docs", "evidence": "README updated"}]}
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=self._cli(evidence),
+            criteria=["docs"], log=self.logs.append)
+        self.assertEqual(result["outcome"], "verified")
+        self.assertEqual(result["passes"], 2)
+
+    def test_budget_exhausted_when_evidence_never_arrives(self):
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=self._cli({}),
+            criteria=["build"], max_passes=2, log=self.logs.append)
+        self.assertEqual(result["outcome"], "budget_exhausted")
+        self.assertEqual(result["passes"], 2)
+        self.assertIn("max_passes", result["reason"])
+
+    def test_blocked_prefix_transitions_to_blocked(self):
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path,
+            run_cli=self._cli({}, response=sup.BLOCKED_PREFIX + " need production credentials"),
+            criteria=["build"], log=self.logs.append)
+        self.assertEqual(result["outcome"], "blocked")
+        self.assertIn("need production credentials", result["reason"])
+
+    def test_explicit_blocked_field(self):
+        def run_cli(prompt, pass_no):
+            return {"exit_code": 0, "stdout": "", "blocked": "repo is dirty"}
+        result = sup.run_supervised_loop(7, "task", self.state_path, run_cli=run_cli,
+                                         criteria=["build"], log=self.logs.append)
+        self.assertEqual(result["outcome"], "blocked")
+        self.assertIn("repo is dirty", result["reason"])
+
+    def test_depth_refused_before_any_work(self):
+        called = []
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path,
+            run_cli=lambda p, n: called.append(n) or {},
+            criteria=["build"], spawn_depth=3, log=self.logs.append)
+        self.assertEqual(result["outcome"], "depth_refused")
+        self.assertEqual(called, [])
+        self.assertFalse(os.path.exists(self.state_path))
+
+    def test_lost_heartbeat_stops_the_run(self):
+        def refuse():
+            raise RuntimeError("409 nonce refused")
+
+        def slow_cli(prompt, pass_no):
+            # A real pass takes minutes; emulate enough duration for the
+            # heartbeat to accrue its bounded failures.
+            time.sleep(0.02)
+            return {"exit_code": 0, "stdout": ""}
+
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=slow_cli,
+            criteria=["build"], heartbeat_call=refuse, heartbeat_interval=0.02,
+            max_passes=50, log=self.logs.append)
+        self.assertEqual(result["outcome"], "lost")
+        self.assertIn("heartbeat", result["reason"])
+
+    def test_path_violation_blocks(self):
+        def run_cli(prompt, pass_no):
+            return {"exit_code": 0, "stdout": "", "changed_paths": ["/etc/passwd"]}
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=run_cli,
+            allowed_paths=[self.dir], criteria=["build"], log=self.logs.append)
+        self.assertEqual(result["outcome"], "blocked")
+        self.assertIn("path violation", result["reason"])
+
+    def test_protected_path_blocks_even_when_allowed(self):
+        protected = os.path.join(self.dir, ".bare-ai", "config", "vault.env")
+
+        def run_cli(prompt, pass_no):
+            return {"exit_code": 0, "stdout": "", "changed_paths": [protected]}
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=run_cli,
+            allowed_paths=[self.dir], criteria=["build"], log=self.logs.append)
+        self.assertEqual(result["outcome"], "blocked")
+        self.assertIn("protected credential path", result["reason"])
+
+    def test_unparseable_output_does_not_crash(self):
+        def run_cli(prompt, pass_no):
+            return {"exit_code": 0, "stdout": "no json here at all"}
+        result = sup.run_supervised_loop(7, "task", self.state_path, run_cli=run_cli,
+                                         criteria=["build"], max_passes=1, log=self.logs.append)
+        self.assertEqual(result["outcome"], "budget_exhausted")
+        self.assertEqual(len(result["state"]["passes"]), 1)
+
+    def test_cli_exception_recorded_as_failed_pass(self):
+        def boom(prompt, pass_no):
+            raise RuntimeError("cli missing")
+        result = sup.run_supervised_loop(7, "task", self.state_path, run_cli=boom,
+                                         criteria=["build"], max_passes=1, log=self.logs.append)
+        self.assertEqual(result["outcome"], "budget_exhausted")
+        self.assertEqual(result["state"]["passes"][0]["exit_code"], -1)
+
+    def test_reflection_only_on_verified(self):
+        seen = []
+        sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=self._cli({}),
+            criteria=["build"], max_passes=1,
+            reflect=lambda text: seen.append(text), log=self.logs.append)
+        self.assertEqual(seen, [])
+        sup.run_supervised_loop(
+            7, "task", self.state_path,
+            run_cli=self._cli({1: [{"criterion": "build", "evidence": "green"}]}),
+            criteria=["build"], reflect=lambda text: seen.append(text), log=self.logs.append)
+        self.assertEqual(len(seen), 1)
+        self.assertIn("build", seen[0])
+
+    def test_reflection_failure_does_not_invalidate_verified_run(self):
+        def bad_reflect(_text):
+            raise RuntimeError("role.md unwritable")
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path,
+            run_cli=self._cli({1: [{"criterion": "build", "evidence": "green"}]}),
+            criteria=["build"], reflect=bad_reflect, log=self.logs.append)
+        self.assertEqual(result["outcome"], "verified")
+
+    def test_execution_budget_clamped_to_horizon(self):
+        ticks = iter([0, 0, 10 ** 6])
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=self._cli({}),
+            criteria=["build"], max_passes=5, max_execution_seconds=999999,
+            clock=lambda: next(ticks, 10 ** 6), log=self.logs.append)
+        self.assertEqual(result["outcome"], "budget_exhausted")
+        self.assertIn("max_execution_seconds", result["reason"])

@@ -717,6 +717,152 @@ def verify_only_cli(argv):
     print(profile_gate_json(ctx=ctx))
     return 0
 
+
+# --- Stage 0 supervised runner (flag-gated; default OFF) ---------------------
+# Why: the legacy path makes one CLI call per pass and only inspects the exit
+# code. With TASKBUS_SUPERVISOR=1 the runner instead drives a state-file loop
+# with per-criterion evidence, a lease heartbeat and a process-group kill-switch.
+# With the flag unset the code below is never reached and behaviour is identical.
+
+def _supervisor_enabled():
+    return (os.environ.get("TASKBUS_SUPERVISOR") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _supervisor_module():
+    try:
+        import taskbus_supervisor as sup
+        return sup
+    except Exception:                                # noqa: BLE001
+        return None
+
+
+def _supervisor_criterion_spec(task_text):
+    """The deterministic check spec, if the ticket carries one."""
+    spec = (os.environ.get("TASKBUS_CRITERION") or "").strip()
+    if spec:
+        return spec
+    try:
+        meta = taskbus_ticket_meta(task_text) or {}
+    except Exception:                                # noqa: BLE001
+        return ""
+    return str(meta.get("success_criterion") or "").strip()
+
+
+def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout):
+    sup = _supervisor_module()
+    if sup is None:
+        print("supervisor: taskbus_supervisor module unavailable - falling back to legacy path")
+        return None
+    row_id = (os.environ.get("TASKBUS_ROW_ID") or "").strip() or "unknown"
+    workdir = cwd or os.getcwd()
+    state_path = os.path.join(workdir, ".taskbus-state-%s.md" % row_id)
+    spec = _supervisor_criterion_spec(task_text)
+    criteria = [spec] if spec else []
+    spawn_depth = int((os.environ.get("TASKBUS_SPAWN_DEPTH") or "0").strip() or 0)
+
+    try:
+        with open(task_path, encoding="utf-8") as fh:
+            task_body = fh.read()
+    except OSError:
+        task_body = task_text
+
+    def run_cli(prompt_text, pass_no):
+        prompt_file = os.path.join(workdir, ".taskbus-supervised-pass%d.prompt" % pass_no)
+        with open(prompt_file, "w", encoding="utf-8") as fh:
+            fh.write(prompt_text)
+        cmd = [NODE, CLI, "--yolo", "--tools"]
+        if pass_no > 1:
+            cmd += ["--resume", "latest"]
+        cmd += ["-p", "", "--prompt-file", prompt_file, "-o", "json"]
+        proc = subprocess.Popen(cmd, env=env, cwd=workdir, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
+        try:
+            out, err = sup.drain_streams(proc)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                sup.terminate_process_group(proc)
+        finally:
+            if proc.poll() is None:
+                sup.terminate_process_group(proc)
+        result = {"exit_code": proc.returncode if proc.returncode is not None else -1,
+                  "stdout": out.decode("utf-8", "replace"),
+                  "stderr": err.decode("utf-8", "replace")}
+        if spec:
+            try:
+                ok, report = _execute_criterion(spec)
+            except Exception as exc:                 # noqa: BLE001
+                ok, report = False, ["criterion check failed: %s" % exc]
+            if ok:
+                result["evidence"] = [{"criterion": spec, "evidence": " | ".join(report)[:800]}]
+        return result
+
+    def heartbeat_call():
+        nonce = (os.environ.get("TASKBUS_CLAIM_NONCE") or "").strip()
+        if not nonce:
+            raise RuntimeError("no TASKBUS_CLAIM_NONCE supplied")
+        base = (os.environ.get("TASKBUS_API_BASE") or "").rstrip("/")
+        if not base:
+            raise RuntimeError("no TASKBUS_API_BASE supplied")
+        key = (os.environ.get("TASKBUS_API_KEY") or "").strip()
+        if not key:
+            raise RuntimeError("no TASKBUS_API_KEY supplied")
+        url = "%s/v1/taskbus/rows/%s/heartbeat" % (base, row_id)
+        req = urllib.request.Request(url, data=b"{}", method="POST",
+                                     headers={"X-API-Key": key, "X-Claim-Nonce": nonce,
+                                              "Content-Type": "application/json",
+                                              "User-Agent": "bare-ai-supervisor/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status != 200:
+                raise RuntimeError("heartbeat HTTP %s" % resp.status)
+
+    have_nonce = bool((os.environ.get("TASKBUS_CLAIM_NONCE") or "").strip())
+    print("supervisor: enabled row=%s state=%s criteria=%d depth=%d heartbeat=%s"
+          % (row_id, os.path.basename(state_path), len(criteria), spawn_depth,
+             "on" if have_nonce else "DISABLED(no nonce)"))
+
+    def reflect(text):
+        return sup.reflect_to_role_diary(
+            os.path.join(os.path.expanduser("~"), ".bare-ai", "role.md"),
+            os.path.join(os.path.expanduser("~"), "bare-necessities-workspace",
+                         "bare-ai-diary", _today_stamp() + ".md"),
+            text)
+
+    result = sup.run_supervised_loop(
+        row_id=row_id, task_text=task_body, state_path=state_path,
+        run_cli=run_cli, heartbeat_call=heartbeat_call if have_nonce else None,
+        allowed_paths=_supervisor_allowed_paths(workdir), criteria=criteria,
+        spawn_depth=spawn_depth, max_passes=max_passes,
+        max_execution_seconds=min(timeout * max(1, max_passes), sup.DEFAULT_MAX_EXECUTION_SECONDS),
+        reflect=reflect, log=lambda m: print(m))
+
+    print("SUPERVISOR_RESULT " + json.dumps({
+        "outcome": result["outcome"], "reason": result["reason"],
+        "passes": result["passes"], "state_path": result["state_path"],
+        "status_hint": "HumanReviewNeeded",
+    }, sort_keys=True))
+    return 0 if result["outcome"] == "verified" else 1
+
+
+def _supervisor_allowed_paths(workdir):
+    paths = [workdir]
+    inc = os.path.join(os.path.expanduser("~"), ".bare-ai", "config", "job-include-dirs")
+    try:
+        with open(inc, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    paths.append(line)
+    except OSError:
+        pass
+    return paths
+
+
+def _today_stamp():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
 def main():
     if "--verify-only" in sys.argv:
         return verify_only_cli(sys.argv)
@@ -902,6 +1048,10 @@ def main():
 
     feedback = ""
     last_report = []
+    if _supervisor_enabled():
+        supervised = _supervised_main(pf, cwd, task_path, task, env, MAX_PASSES, TIMEOUT)
+        if supervised is not None:
+            return supervised
     for attempt in range(1, MAX_PASSES + 1):
         pf_use = task_path
         if feedback:
