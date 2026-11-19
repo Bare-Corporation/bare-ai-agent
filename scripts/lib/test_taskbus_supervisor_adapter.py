@@ -5,9 +5,13 @@ The point of these tests is the DEFAULT: with TASKBUS_SUPERVISOR unset the runne
 must behave exactly as before, and the supervisor path must not be reachable.
 The job file has dashes in its name, so it is loaded by path.
 """
+import contextlib
 import importlib.util
+import io
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -156,6 +160,142 @@ class HeartbeatApiKeyTests(unittest.TestCase):
         body = source[start:start + 1200]
         self.assertIn("_heartbeat_api_key()", body)
         self.assertNotIn('os.environ.get("TASKBUS_API_KEY")', body)
+
+
+# A real task-bus prompt envelope, as the poller writes it. The canary crashed on
+# exactly this input, so the tests below use the real text rather than a stub.
+REAL_ENVELOPE = """TASK-BUS JOB - row 694 (dispatched by the task-bus poller)
+SHORT DESCRIPTION: Stage 1 canary on the worker node
+EXECUTION PROFILE: canary
+"""
+
+
+class SupervisorCriterionSeamTests(unittest.TestCase):
+    """The seam between the PARSED checks and the supervisor's LABEL.
+
+    Row 694 died at the criterion line because taskbus_ticket_meta() returns a
+    (row_id, title) TUPLE and the code called .get() on it. One defect deeper,
+    _supervised_main also handed that label STRING to _execute_criterion(), which
+    wants the parsed list of kind/args dicts - silently, because that call sits in
+    a bare except. Both are covered here against the real envelope.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.job = load_job()
+
+    def setUp(self):
+        self._saved = {}
+        for key in ("TASKBUS_CRITERION", "TASKBUS_ROW_ID", "TASKBUS_CLAIM_NONCE",
+                    "TASKBUS_SUPERVISOR"):
+            self._saved[key] = os.environ.pop(key, None)
+        self.tmp = tempfile.mkdtemp(prefix="criterion-seam-")
+
+    def tearDown(self):
+        for key, value in self._saved.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    # ---- the envelope contract -------------------------------------------
+    def test_ticket_meta_really_returns_a_two_tuple(self):
+        meta = self.job.taskbus_ticket_meta(REAL_ENVELOPE)
+        self.assertIsInstance(meta, tuple)
+        self.assertEqual(len(meta), 2)
+        self.assertEqual(meta[0], "694")
+        # The point of the regression: it is NOT a mapping, so .get() cannot work.
+        self.assertFalse(hasattr(meta, "get"))
+
+    def test_criterion_spec_survives_the_ticket_envelope(self):
+        # Regression: this raised AttributeError - tuple has no attribute get.
+        self.assertEqual(self.job._supervisor_criterion_spec(REAL_ENVELOPE), "")
+
+    # ---- label derivation -------------------------------------------------
+    def test_criterion_spec_labels_the_parsed_checks(self):
+        parsed = [{"kind": "file_exists", "args": ["/tmp/x"]},
+                  {"kind": "http_status", "args": ["https://example.invalid", "200"]}]
+        self.assertEqual(self.job._supervisor_criterion_spec(REAL_ENVELOPE, parsed),
+                         "file_exists:/tmp/x ; http_status:https://example.invalid;200")
+
+    def test_env_criterion_still_wins_over_the_parsed_spec(self):
+        os.environ["TASKBUS_CRITERION"] = "exit_zero"
+        parsed = [{"kind": "file_exists", "args": ["/tmp/x"]}]
+        self.assertEqual(self.job._supervisor_criterion_spec(REAL_ENVELOPE, parsed),
+                         "exit_zero")
+
+    def test_label_ignores_unusable_entries(self):
+        parsed = ["not-a-dict", {"args": ["x"]}, {"kind": "file_exists", "args": []}]
+        self.assertEqual(self.job._criterion_label(parsed), "file_exists")
+
+    def test_label_is_empty_without_checks(self):
+        self.assertEqual(self.job._criterion_label(None), "")
+        self.assertEqual(self.job._criterion_label([]), "")
+
+    # ---- _supervised_main entry setup ------------------------------------
+    def _fake_supervisor(self, captured):
+        class FakeSupervisor:
+            DEFAULT_MAX_EXECUTION_SECONDS = 600
+
+            @staticmethod
+            def reflect_to_role_diary(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def run_supervised_loop(**kwargs):
+                captured.update(kwargs)
+                return {"outcome": "budget_exhausted", "reason": "seam test",
+                        "passes": 1, "state_path": kwargs.get("state_path")}
+
+        return FakeSupervisor()
+
+    def test_supervised_main_entry_setup_registers_the_parsed_criterion(self):
+        task_path = os.path.join(self.tmp, "task.md")
+        with open(task_path, "w", encoding="utf-8") as fh:
+            fh.write(REAL_ENVELOPE)
+        criterion = [{"kind": "file_exists", "args": ["/tmp/probe"]}]
+        captured = {}
+        original = self.job._supervisor_module
+        self.job._supervisor_module = lambda: self._fake_supervisor(captured)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = self.job._supervised_main(None, self.tmp, task_path, REAL_ENVELOPE,
+                                               dict(os.environ), 2, 60,
+                                               criterion_spec=criterion)
+        finally:
+            self.job._supervisor_module = original
+        # Reached the loop at all: the canary died before this line.
+        self.assertEqual(captured.get("criteria"), ["file_exists:/tmp/probe"])
+        self.assertEqual(rc, 1)          # not verified, so not a success code
+
+    def test_supervised_main_entry_setup_without_a_criterion_registers_none(self):
+        task_path = os.path.join(self.tmp, "task.md")
+        with open(task_path, "w", encoding="utf-8") as fh:
+            fh.write(REAL_ENVELOPE)
+        captured = {}
+        original = self.job._supervisor_module
+        self.job._supervisor_module = lambda: self._fake_supervisor(captured)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.job._supervised_main(None, self.tmp, task_path, REAL_ENVELOPE,
+                                          dict(os.environ), 1, 30)
+        finally:
+            self.job._supervisor_module = original
+        self.assertEqual(captured.get("criteria"), [])
+
+    # ---- the executor takes the parsed list, never the label -------------
+    def test_execute_criterion_accepts_the_parsed_list(self):
+        probe = os.path.join(self.tmp, "present.txt")
+        open(probe, "w").close()
+        ok, report = self.job._execute_criterion([{"kind": "file_exists", "args": [probe]}])
+        self.assertTrue(ok)
+        self.assertIn("PASS", report[0])
+
+    def test_execute_criterion_rejects_the_label_form(self):
+        # Negative control for the old call shape: a label STRING raises instead of
+        # quietly reporting "no checks executed".
+        with self.assertRaises(AttributeError):
+            self.job._execute_criterion("file_exists:/tmp/x")
 
 
 if __name__ == "__main__":

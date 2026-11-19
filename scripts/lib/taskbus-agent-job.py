@@ -767,19 +767,45 @@ def _supervisor_module():
         return None
 
 
-def _supervisor_criterion_spec(task_text):
-    """The deterministic check spec, if the ticket carries one."""
+def _criterion_label(criteria):
+    """One stable label for a parsed criterion list.
+
+    The supervisor keys its state file, its brief and its evidence by a criterion
+    LABEL string, while _execute_criterion() takes the parsed check list. This is
+    the bridge between the two. It must stay deterministic: the same label is
+    registered on pass 1 and matched when evidence arrives on pass N.
+    """
+    parts = []
+    for check in criteria or []:
+        if not isinstance(check, dict):
+            continue
+        kind = str(check.get("kind") or "").strip()
+        if not kind:
+            continue
+        args = check.get("args") or []
+        parts.append((kind + ":" + ";".join(str(a) for a in args)) if args else kind)
+    return " ; ".join(parts)
+
+
+def _supervisor_criterion_spec(task_text, criteria=None):
+    """The criterion LABEL for the supervisor brief, or "" when none was supplied.
+
+    WHY the ticket envelope is no longer read here: taskbus_ticket_meta() returns
+    (row_id, title) - a 2-tuple, never a mapping - so calling .get() on it raised
+    AttributeError on the first real supervised dispatch (row 694). The envelope
+    carries no criterion in any case: the POLLER parses success_criterion and ships
+    the result as TASKBUS_CRITERION_JSON, which main() decodes and passes in here.
+    task_text stays in the signature for callers that pass it positionally.
+    """
+    del task_text
     spec = (os.environ.get("TASKBUS_CRITERION") or "").strip()
     if spec:
         return spec
-    try:
-        meta = taskbus_ticket_meta(task_text) or {}
-    except Exception:                                # noqa: BLE001
-        return ""
-    return str(meta.get("success_criterion") or "").strip()
+    return _criterion_label(criteria)
 
 
-def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout):
+def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout,
+                     criterion_spec=None):
     sup = _supervisor_module()
     if sup is None:
         print("supervisor: taskbus_supervisor module unavailable - falling back to legacy path")
@@ -787,8 +813,12 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout):
     row_id = (os.environ.get("TASKBUS_ROW_ID") or "").strip() or "unknown"
     workdir = cwd or os.getcwd()
     state_path = os.path.join(workdir, ".taskbus-state-%s.md" % row_id)
-    spec = _supervisor_criterion_spec(task_text)
-    criteria = [spec] if spec else []
+    # criterion_spec is the PARSED check list main() decoded from the poller's
+    # TASKBUS_CRITERION_JSON. The supervisor keys on a label string; only
+    # _execute_criterion takes the parsed list.
+    parsed = [c for c in (criterion_spec or []) if isinstance(c, dict)]
+    label = _supervisor_criterion_spec(task_text, parsed)
+    criteria = [label] if label else []
     spawn_depth = int((os.environ.get("TASKBUS_SPAWN_DEPTH") or "0").strip() or 0)
 
     try:
@@ -820,13 +850,16 @@ def _supervised_main(pf, cwd, task_path, task_text, env, max_passes, timeout):
         result = {"exit_code": proc.returncode if proc.returncode is not None else -1,
                   "stdout": out.decode("utf-8", "replace"),
                   "stderr": err.decode("utf-8", "replace")}
-        if spec:
+        if parsed:
             try:
-                ok, report = _execute_criterion(spec)
+                ok, report = _execute_criterion(parsed)
             except Exception as exc:                 # noqa: BLE001
                 ok, report = False, ["criterion check failed: %s" % exc]
-            if ok:
-                result["evidence"] = [{"criterion": spec, "evidence": " | ".join(report)[:800]}]
+            if ok and label:
+                # The SAME string the supervisor registered, or the evidence is
+                # rejected as unattached and the run can never reach verified.
+                result["evidence"] = [{"criterion": label,
+                                       "evidence": " | ".join(report)[:800]}]
         return result
 
     def heartbeat_call():
@@ -1085,7 +1118,8 @@ def main():
     feedback = ""
     last_report = []
     if _supervisor_enabled():
-        supervised = _supervised_main(pf, cwd, task_path, task, env, MAX_PASSES, TIMEOUT)
+        supervised = _supervised_main(pf, cwd, task_path, task, env, MAX_PASSES, TIMEOUT,
+                                      criterion_spec=spec)
         if supervised is not None:
             return supervised
     for attempt in range(1, MAX_PASSES + 1):
