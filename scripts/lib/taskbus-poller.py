@@ -1105,6 +1105,22 @@ def spawn_depth_for(row_id, fetch_row):
         return 0, "row id %r is not an integer" % (row_id,)
 
 
+def max_spawn_depth():
+    """The depth limit, read from the supervisor module (single source).
+
+    NOT a module constant here on purpose: the poller and the runner must agree on
+    the limit, and the supervisor module is where it is defined. Falls back to 3 if
+    the module or the attribute is missing, so a degraded import cannot silently
+    disable the guard.
+    """
+    sup = supervisor_module()
+    value = getattr(sup, "MAX_SPAWN_DEPTH", None) if sup is not None else None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 3
+
+
 def spawn_depth_allows(depth):
     """(ok, reason) from the supervisor's guard. Allows when the module is absent."""
     sup = supervisor_module()
@@ -2911,6 +2927,31 @@ class Poller:
         (setsid+nohup) and may not have opened it yet, so deleting it here would race
         the runner.
         """
+        # DEPTH AT DISPATCH TIME, not only at claim time. claim() refuses a row at or
+        # beyond MAX_SPAWN_DEPTH, but the parent chain can be deepened BETWEEN the
+        # claim and this spawn, and a self-target row is spawned from this process.
+        # One or two reads here close that window before any runner starts.
+        _depth, _depth_problem = self.bus.spawn_depth(rid)
+        if _depth_problem:
+            log("row %s: spawn depth not computed for the local dispatch (%s)"
+                % (rid, _depth_problem), "WARN")
+        _depth_limit = max_spawn_depth()
+        if _depth >= _depth_limit:
+            reason = ("spawn depth %d has reached the limit of %d"
+                      % (_depth, _depth_limit))
+            log("row %s: REFUSED before the local spawn - %s (no runner will run)"
+                % (rid, reason), "ERROR")
+            note = append_note((row or {}).get("machines_response"),
+                               reason + " (row not dispatched)")
+            try:
+                self.bus.patch(rid, {"status": "Blocked", "machines_response": note,
+                                     "re_opened_or_retry_reason": reason},
+                               "spawn depth refused before the local spawn")
+            except GatewayError as exc:
+                log("row %s: local depth refusal could NOT be written: %s"
+                    % (rid, str(exc)[:200]), "ERROR")
+            self.record("claim-refused-depth", rid, reason)
+            return
         if not os.path.exists(LOCAL_RUNNER):
             msg = "local runner missing: %s" % LOCAL_RUNNER
             log(msg, "ERROR")
@@ -2960,7 +3001,12 @@ class Poller:
             _req = "1" if _claim.get("execution_profile") else "0"
             env["TASKBUS_CLAIM_PAYLOAD"] = _local_claim
             env["TASKBUS_PROFILE_REQUIRED"] = _req
-            _sup_env_map = supervisor_env_for_claim(_claim, rid)
+            # Same bridge contract as the remote path: five vars, including the
+            # row's stamped model and the computed depth. A self-polling worker runs
+            # this path, so a var missing here is a var missing in production.
+            _sup_env_map = supervisor_env_for_claim(
+                _claim, rid, spawn_depth=_depth,
+                row_model=(_row_model or row_model_catalog(_claim)))
             if _sup_env_map:
                 env.update(_sup_env_map)
                 log("row %s: supervisor bridge exporting %d env var(s) locally"

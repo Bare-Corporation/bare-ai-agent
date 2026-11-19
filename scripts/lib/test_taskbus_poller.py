@@ -12,6 +12,8 @@ import datetime
 import importlib.util
 import os
 import pathlib
+import shutil
+import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -303,6 +305,107 @@ class SupervisorBridgeRowModelTests(unittest.TestCase):
                                               row_model=self.m.row_model_catalog({"id": 699}))
         self.assertNotIn("TASKBUS_ROW_MODEL", env)
         self.assertNotIn("TASKBUS_ROW_MODEL", self.m.supervisor_env_prefix(env))
+
+
+class SelfDispatchBridgeTests(unittest.TestCase):
+    """The LOCAL self-dispatch path must mirror the remote bridge (row 700).
+
+    Before this, dispatch_self() called supervisor_env_for_claim(claim, rid) with no
+    depth and no model, so a self-polling worker saw a four-var bridge and no
+    TASKBUS_SPAWN_DEPTH at all.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load_poller()
+
+    def setUp(self):
+        self._saved = os.environ.pop("TASKBUS_SUPERVISOR", None)
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+        self._originals = {name: getattr(self.m, name)
+                           for name in ("log", "JOB_DIR", "LOCAL_RUNNER")}
+        self.tmp = tempfile.mkdtemp(prefix="self-dispatch-")
+        self.m.JOB_DIR = self.tmp
+        runner = os.path.join(self.tmp, "runner.py")
+        open(runner, "w").close()
+        self.m.LOCAL_RUNNER = runner
+        self.logs = []
+        self.m.log = lambda msg, level="INFO": self.logs.append((level, msg))
+        self.runs = []
+        self._real_run = self.m.subprocess.run
+        self.m.subprocess.run = self._fake_run
+        self.patches = []
+
+    def tearDown(self):
+        self.m.subprocess.run = self._real_run
+        for name, value in self._originals.items():
+            setattr(self.m, name, value)
+        os.environ.pop("TASKBUS_SUPERVISOR", None)
+        if self._saved is not None:
+            os.environ["TASKBUS_SUPERVISOR"] = self._saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fake_run(self, cmd, env=None, **kwargs):
+        self.runs.append({"cmd": cmd, "env": dict(env or {})})
+        return None
+
+    class _Bus:
+        def __init__(self, depth=(0, ""), claim=None):
+            self.depth = depth
+            self.last_claim = claim
+
+        def spawn_depth(self, rid):
+            return self.depth
+
+        def patch(self, rid, body, why, allow_reclaim=True):
+            self.patched.append((rid, dict(body), why))
+            return {}
+
+    def _poller(self, depth=(0, "")):
+        bus = self._Bus(depth=depth, claim=dict(LIVE_CLAIM_699))
+        bus.patched = []
+        poller = object.__new__(self.m.Poller)
+        poller.bus = bus
+        poller.live = True
+        poller.records = []
+        poller.record = lambda kind, rid, detail="": poller.records.append((kind, rid, detail))
+        return poller
+
+    def _drive(self, poller, row=None):
+        poller.dispatch_self("td-taskbus-test", 699, "prompt text",
+                             row if row is not None else dict(FETCHED_ROW_699))
+
+    def test_self_dispatch_exports_five_bridge_vars(self):
+        poller = self._poller()
+        self._drive(poller)
+        self.assertEqual(len(self.runs), 1, "the runner must be spawned once")
+        env = self.runs[0]["env"]
+        self.assertEqual(env.get("TASKBUS_ROW_MODEL"), "deepseek-v4-flash")
+        self.assertEqual(env.get("TASKBUS_SPAWN_DEPTH"), "0")
+        self.assertEqual(env.get("TASKBUS_CLAIM_NONCE"), LIVE_CLAIM_699["nonce"])
+        self.assertEqual(env.get("TASKBUS_ROW_ID"), "699")
+        self.assertEqual(env.get("TASKBUS_SUPERVISOR"), "1")
+        self.assertTrue(any("exporting 5 env var(s) locally" in msg
+                            for _level, msg in self.logs))
+
+    def test_self_dispatch_refuses_an_over_deep_row_before_spawning(self):
+        # A chain deepened between the claim and the spawn must not reach a runner.
+        poller = self._poller(depth=(3, ""))
+        self._drive(poller)
+        self.assertEqual(self.runs, [], "no runner may be spawned for an over-deep row")
+        self.assertEqual(len(poller.bus.patched), 1)
+        _rid, body, why = poller.bus.patched[0]
+        self.assertEqual(body["status"], "Blocked")
+        self.assertIn("limit", body["re_opened_or_retry_reason"])
+        self.assertIn("local spawn", why)
+        self.assertTrue(any(kind == "claim-refused-depth" for kind, _rid, _d in poller.records))
+
+    def test_self_dispatch_proceeds_below_the_limit(self):
+        poller = self._poller(depth=(2, ""))
+        self._drive(poller)
+        self.assertEqual(len(self.runs), 1)
+        self.assertEqual(self.runs[0]["env"].get("TASKBUS_SPAWN_DEPTH"), "2")
+        self.assertEqual(poller.bus.patched, [])
 
 
 if __name__ == "__main__":
