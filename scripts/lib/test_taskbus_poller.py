@@ -248,5 +248,62 @@ class RowModelCatalogTests(unittest.TestCase):
         self.assertEqual(self.m.row_model_catalog(None), "")
 
 
+# The exact live POST /v1/taskbus/rows/{id}/claim response (measured on row 699).
+# Note what is absent: model_catalog. The claim can never supply the model.
+LIVE_CLAIM_699 = {
+    "attempts_taken": 1, "claimed_at": "2026-11-19T21:00:00Z",
+    "execution_profile": {"id": 14, "name": "canary"},
+    "lease_expires_at": "2026-11-19T21:15:00Z", "lease_seconds": 900,
+    "machine": "worker-node", "nonce": "nonce-699-abc",
+    "row_id": 699, "status": "InProgress", "token_key_id": 42,
+}
+# The fetched row the poller already holds from GET /v1/taskbus/rows/{id}.
+FETCHED_ROW_699 = {"id": 699, "short_description": "canary",
+                   "model_catalog": [{"id": 38, "value": "deepseek-v4-flash"}]}
+
+
+class SupervisorBridgeRowModelTests(unittest.TestCase):
+    """The row's model must reach the runner through the supervisor bridge (699)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load_poller()
+
+    def setUp(self):
+        self._saved = os.environ.pop("TASKBUS_SUPERVISOR", None)
+        os.environ["TASKBUS_SUPERVISOR"] = "1"
+
+    def tearDown(self):
+        os.environ.pop("TASKBUS_SUPERVISOR", None)
+        if self._saved is not None:
+            os.environ["TASKBUS_SUPERVISOR"] = self._saved
+
+    def test_the_live_claim_carries_no_model(self):
+        # The premise of the fix: the claim response cannot supply the model.
+        self.assertNotIn("model_catalog", LIVE_CLAIM_699)
+        self.assertEqual(self.m.row_model_catalog(LIVE_CLAIM_699), "")
+
+    def test_the_fetched_row_supplies_it(self):
+        self.assertEqual(self.m.row_model_catalog(FETCHED_ROW_699), "deepseek-v4-flash")
+
+    def test_bridge_exports_five_vars_including_the_row_model(self):
+        env = self.m.supervisor_env_for_claim(
+            LIVE_CLAIM_699, 699, spawn_depth=1,
+            row_model=self.m.row_model_catalog(FETCHED_ROW_699))
+        self.assertEqual(env["TASKBUS_ROW_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(env["TASKBUS_CLAIM_NONCE"], "nonce-699-abc")
+        self.assertEqual(env["TASKBUS_SPAWN_DEPTH"], "1")
+        self.assertEqual(len(env), 5)
+        prefix = self.m.supervisor_env_prefix(env)
+        self.assertIn("TASKBUS_ROW_MODEL=deepseek-v4-flash", prefix)
+
+    def test_the_bridge_omits_the_row_model_when_the_row_has_none(self):
+        # Control: no stamped model must not become an empty assignment.
+        env = self.m.supervisor_env_for_claim(LIVE_CLAIM_699, 699, spawn_depth=1,
+                                              row_model=self.m.row_model_catalog({"id": 699}))
+        self.assertNotIn("TASKBUS_ROW_MODEL", env)
+        self.assertNotIn("TASKBUS_ROW_MODEL", self.m.supervisor_env_prefix(env))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

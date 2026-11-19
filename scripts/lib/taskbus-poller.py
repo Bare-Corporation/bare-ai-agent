@@ -1140,7 +1140,8 @@ def row_model_catalog(row):
     return ""
 
 
-def supervisor_env_map(claim, row_id, api_key=None, api_base=None, spawn_depth=None):
+def supervisor_env_map(claim, row_id, api_key=None, api_base=None, spawn_depth=None,
+                       row_model=None):
     """Environment additions for the runner. Empty dict when the flag is off."""
     if not supervisor_enabled():
         return {}
@@ -1157,6 +1158,11 @@ def supervisor_env_map(claim, row_id, api_key=None, api_base=None, spawn_depth=N
             out["TASKBUS_SPAWN_DEPTH"] = str(int(spawn_depth))
         except (TypeError, ValueError):
             pass
+    # The row's stamped model travels with the rest of the supervisor inputs, so
+    # the bridge export is complete and its count is evidence. It comes from the
+    # FETCHED row: the claim response has no model_catalog field at all.
+    if row_model not in (None, ""):
+        out["TASKBUS_ROW_MODEL"] = str(row_model).strip()
     # The key is deliberately NOT exported any more: supervisor_env_prefix renders
     # this map into a REMOTE ssh command line, so a key placed here is visible in
     # ps on the target node. The runner resolves its own key from Vault instead
@@ -1216,7 +1222,7 @@ def supervisor_close_body(parsed, log_excerpt=""):
     return body
 
 
-def supervisor_env_for_claim(claim, row_id, spawn_depth=None):
+def supervisor_env_for_claim(claim, row_id, spawn_depth=None, row_model=None):
     """Environment for one claim. The runner sources its own key, so none is sent.
 
     This used to fetch the agent key and pass it in, purely so it could be exported.
@@ -1225,7 +1231,8 @@ def supervisor_env_for_claim(claim, row_id, spawn_depth=None):
     """
     if not supervisor_enabled():
         return {}
-    return supervisor_env_map(claim, row_id, spawn_depth=spawn_depth)
+    return supervisor_env_map(claim, row_id, spawn_depth=spawn_depth,
+                              row_model=row_model)
 
 
 def _gw_request(path, method="GET", body=None, nonce=None, timeout=30,
@@ -2815,8 +2822,13 @@ class Poller:
             # The model is stamped on the ROW, not in the profile snapshot. Ship it
             # so the runner can resolve the route its verified profile is meant to
             # use instead of falling back to the node's own profile.env.
-            _row_model = row_model_catalog(row)
-            if _row_model:
+            # From the FETCHED row, with the claim only as a fallback: the claim
+            # response carries no model_catalog (measured on row 699). When a claim
+            # exists the value rides in the supervisor bridge instead, so it is
+            # never assigned twice in the same command line.
+            _row_model = (row_model_catalog(row)
+                          or row_model_catalog(getattr(self.bus, "last_claim", None)))
+            if _row_model and getattr(self.bus, "last_claim", None) is None:
                 _env += "TASKBUS_ROW_MODEL=%s " % _shlex.quote(_row_model)
             log("row %s: shipping %d criterion check(s) + cwd=%s + model=%s to the runner"
                 % (rid, len(_parsed), _cwd, _row_model or "<none>"))
@@ -2842,7 +2854,9 @@ class Poller:
                     log("row %s: spawn depth not computed for the dispatch (%s)"
                         % (rid, _dprob), "WARN")
                 _sup_env = supervisor_env_prefix(
-                    supervisor_env_for_claim(_claim, rid, spawn_depth=_depth))
+                    supervisor_env_for_claim(_claim, rid, spawn_depth=_depth,
+                                             row_model=(row_model_catalog(row)
+                                                        or _row_model)))
                 if _sup_env:
                     log("row %s: supervisor bridge exporting %d env var(s) to the runner"
                         % (rid, _sup_env.count("=")))
