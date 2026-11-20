@@ -239,6 +239,26 @@ class AgentKeyFieldTests(unittest.TestCase):
             self.job._agent_key_field(self._kv(taskbus_api_key=12345)), "")
 
 
+class ReflectionDateStampTests(unittest.TestCase):
+    """Row 713 smoke: reflection failed with a NameError on every verified run.
+
+    _today_stamp() builds the diary filename for the reflect() callback, and it
+    called datetime while this module imported none. Reflection is best-effort by
+    design (it must never invalidate verified output), so the defect was silent:
+    the status line said reflection failed and nothing was ever written.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.job = load_job()
+
+    def test_today_stamp_returns_an_iso_date(self):
+        stamp = self.job._today_stamp()
+        self.assertEqual(len(stamp), 10, stamp)
+        self.assertEqual(stamp[4], "-", stamp)
+        self.assertEqual(stamp[7], "-", stamp)
+
+
 # A real task-bus prompt envelope, as the poller writes it. The canary crashed on
 # exactly this input, so the tests below use the real text rather than a stub.
 REAL_ENVELOPE = """TASK-BUS JOB - row 694 (dispatched by the task-bus poller)
