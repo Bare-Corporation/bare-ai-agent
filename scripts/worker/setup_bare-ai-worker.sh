@@ -33,12 +33,21 @@ NC="\033[0m"
 FAST_UPDATE=false
 TIER="free" # Default to free tier
 PRO_MODE=false
+# Optional provisioning answers. "ask" means: prompt, but only on an
+# interactive full install. A fast/unattended run must never block on a read,
+# because bare-update passes --fast and has nobody to answer it.
+TMUX_CHOICE="ask"
+AUTO_UPDATE_CHOICE="ask"
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --fast) FAST_UPDATE=true; echo -e "${YELLOW}FAST MODE: Skipping engine rebuild...${NC}" ;;
         --tier) TIER="$2"; shift ;;
         --pro) TIER="pro"; PRO_MODE=true ;;
+        --with-tmux) TMUX_CHOICE="yes" ;;
+        --no-tmux) TMUX_CHOICE="no" ;;
+        --auto-update) AUTO_UPDATE_CHOICE="yes" ;;
+        --no-auto-update) AUTO_UPDATE_CHOICE="no" ;;
     esac
     shift
 done
@@ -1034,6 +1043,13 @@ cli_bundle_is_stale() {
 refresh_cli_clone() {
     local dir="$1"
     local label="$2"
+    # 1 when a failure here must fail the update, 0 when it is only reported.
+    # The PRIMARY clone is the one the launcher executes, so a clone that cannot
+    # be updated means this node runs code it cannot refresh - that is exactly
+    # the state the UPDATE INCOMPLETE banner exists for. A dev clone
+    # (bare-ai-cli-work, bare-ai-pro) may legitimately carry local commits or
+    # uncommitted work, so it must never fail the whole update.
+    local fatal="${3:-0}"
 
     if [ ! -d "$dir/.git" ]; then
         return 0
@@ -1053,7 +1069,10 @@ refresh_cli_clone() {
     if ! git -C "$dir" pull --ff-only --quiet origin main 2>/dev/null; then
         echo -e "${YELLOW}WARNING: $label at $dir is not fast-forwardable (local commits or conflicts).${NC}"
         echo -e "${YELLOW}         Left untouched. Resolve it there if this node needs the update.${NC}"
-        return 0
+        if [ "$fatal" = "1" ]; then
+            echo -e "${RED}         This is the clone the launcher runs, so the update is reported INCOMPLETE.${NC}"
+        fi
+        return "$fatal"
     fi
 
     after=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo "")
@@ -1097,7 +1116,12 @@ echo -e "${GREEN}Refreshing CLI clone(s)...${NC}"
 CLI_REFRESH_FAILED=0
 for cli_dir in "$TARGET_HOME/bare-ai-cli" "$TARGET_HOME/bare-ai-cli-work" "$TARGET_HOME/bare-ai-pro"; do
     if [ -d "$cli_dir/.git" ]; then
-        if ! refresh_cli_clone "$cli_dir" "$(basename "$cli_dir")"; then
+        # Only the clone the launcher executes may fail this update.
+        _cli_fatal=0
+        if [ "$cli_dir" = "$TARGET_HOME/bare-ai-cli" ]; then
+            _cli_fatal=1
+        fi
+        if ! refresh_cli_clone "$cli_dir" "$(basename "$cli_dir")" "$_cli_fatal"; then
             CLI_REFRESH_FAILED=1
         fi
     fi
@@ -1429,6 +1453,109 @@ PATH_EOF
 
 cat << 'BARE_FUNC_EOF' >> "$BASHRC_FILE"
 
+# --- UPDATE CHECK HELPERS -------------------------------------------------
+# WHY THESE LIVE IN .bashrc AND NOT IN A SCRIPT: the launcher needs them before
+# it can exec anything, and a node that is behind is exactly the node whose own
+# helper script may not yet be the one it needs. They use only git, sed and
+# coreutils, all of which the installer already requires.
+
+# The auto-update switch. One key, one file, so the installer, the
+# 'bare --auto-update' command and a hand edit all write the same thing.
+BARE_AUTOUPDATE_FILE="$HOME/.bare-ai/config/auto-update.env"
+# The tier this node was installed as, so the launcher re-runs the update with
+# the same flag instead of silently dropping a pro node onto the free path.
+BARE_TIER_FILE="$HOME/.bare-ai/config/tier.env"
+
+bare_autoupdate_state() {
+    local _v=""
+    if [ -f "$BARE_AUTOUPDATE_FILE" ]; then
+        _v="$(sed -n 's/^[[:space:]]*AUTO_UPDATE=//p' "$BARE_AUTOUPDATE_FILE" 2>/dev/null | tail -n 1)"
+    fi
+    case "$_v" in
+        true|TRUE|1|yes|YES|on|ON) echo "on" ;;
+        *) echo "off" ;;
+    esac
+}
+
+# Written to a temp file and moved into place: a half-written switch that
+# happened to read as 'on' would start updating a node nobody asked to update.
+bare_set_autoupdate() {
+    local _value="$1"
+    local _dir=""
+    _dir="$(dirname "$BARE_AUTOUPDATE_FILE")"
+    mkdir -p "$_dir" || return 1
+    local _tmp="$_dir/.auto-update.env.$$"
+    if ! echo "AUTO_UPDATE=$_value" > "$_tmp" 2>/dev/null; then
+        rm -f "$_tmp"
+        echo "bare: could not write $_tmp" >&2
+        return 1
+    fi
+    if ! mv "$_tmp" "$BARE_AUTOUPDATE_FILE" 2>/dev/null; then
+        rm -f "$_tmp"
+        echo "bare: could not replace $BARE_AUTOUPDATE_FILE" >&2
+        return 1
+    fi
+    if [ "$_value" = "true" ]; then
+        echo "AUTO_UPDATE is now on: bare updates behind-the-remote clones before launching."
+    else
+        echo "AUTO_UPDATE is now off: bare offers an update and waits for an answer."
+    fi
+}
+
+bare_tier() {
+    local _t=""
+    if [ -f "$BARE_TIER_FILE" ]; then
+        _t="$(sed -n 's/^[[:space:]]*BARE_TIER=//p' "$BARE_TIER_FILE" 2>/dev/null | tail -n 1)"
+    fi
+    case "$_t" in
+        pro|PRO) echo "pro" ;;
+        *) echo "free" ;;
+    esac
+}
+
+# One entry per repo that is behind origin/main:
+#   LABEL short_local..short_remote (N commits);
+#
+# Every failure path here means "no update offered", never "stop the launch": an
+# offline node, a proxy that accepts the connection then hangs, a detached HEAD,
+# or a directory that is not a clone at all must all degrade to silence. The
+# fetch is bounded so a slow remote cannot hold the launcher at the prompt.
+bare_updates_behind() {
+    local _repo="" _label="" _local="" _remote="" _count="" _plural=""
+    local _summary=""
+    for _repo in "$HOME/bare-ai-agent" "$HOME/bare-ai-cli"; do
+        _label="$(basename "$_repo")"
+        [ -d "$_repo/.git" ] || continue
+        timeout 5s git -C "$_repo" fetch --quiet origin main >/dev/null 2>&1 || continue
+        _local="$(git -C "$_repo" rev-parse --verify HEAD 2>/dev/null)" || continue
+        _remote="$(git -C "$_repo" rev-parse --verify refs/remotes/origin/main 2>/dev/null)" || continue
+        [ -n "$_local" ] || continue
+        [ -n "$_remote" ] || continue
+        # HEAD already contains the remote commit: nothing to fast-forward.
+        if git -C "$_repo" merge-base --is-ancestor "$_remote" "$_local" 2>/dev/null; then
+            continue
+        fi
+        _count="$(git -C "$_repo" rev-list --count "$_local..$_remote" 2>/dev/null)"
+        [ -n "$_count" ] || _count="?"
+        if [ "$_count" = "1" ]; then _plural=""; else _plural="s"; fi
+        _summary="${_summary}${_label} ${_local:0:9}..${_remote:0:9} (${_count} commit${_plural}); "
+    done
+    printf '%s' "$_summary"
+}
+
+# The update itself. Deliberately NOT routed through the bare-update alias: bash
+# expands an alias when a FUNCTION BODY IS PARSED, so an alias defined further
+# down this file is invisible inside a function defined above it. These are the
+# same commands the aliases run and must be kept in step with them.
+bare_run_update() {
+    if [ "$(bare_tier)" = "pro" ]; then
+        ( cd "$HOME/bare-ai-agent" && git pull --ff-only && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro )
+    else
+        ( cd "$HOME/bare-ai-agent" && git pull --ff-only && ./scripts/worker/setup_bare-ai-worker.sh --fast )
+    fi
+}
+
+
 # BARE-AI Hybrid Loader
 bare() {
     local MODEL="${1:-}"
@@ -1447,6 +1574,63 @@ bare() {
     local CONFIG="$HOME/.bare-ai/config/agent.env"
     local VAULT_ENV="$HOME/.bare-ai/config/vault.env"
     local BARE_CLONE="${BARE_CLONE_DIR:-$HOME/bare-ai-cli}"
+
+    # --- AUTO-UPDATE OPT-IN TOGGLE ---
+    # Handled before anything else: 'bare --auto-update on' arrives in the MODEL
+    # slot, and without this branch it would be treated as a model id and
+    # launched. It also has to work while offline, so it is answered locally.
+    if [ "$MODEL" = "--auto-update" ]; then
+        case "${2:-}" in
+            on)
+                bare_set_autoupdate true
+                return $?
+                ;;
+            off)
+                bare_set_autoupdate false
+                return $?
+                ;;
+            *)
+                echo "Usage: bare --auto-update on|off"
+                echo "Currently: $(bare_autoupdate_state)"
+                return 2
+                ;;
+        esac
+    fi
+
+    # --- UPDATE CHECK ---
+    # Skipped in every non-interactive context. A dispatched task-bus job, a cron
+    # run, or a piped stdin has nobody to answer a prompt, and blocking there is
+    # worse than running one revision behind. BARE_UPDATE_CHECKED stops the
+    # post-update relaunch below from checking again and looping.
+    if [ -z "${BARE_UPDATE_CHECKED:-}" ] && [ -t 0 ] && [ -t 1 ]; then
+        local _behind=""
+        local _choice=""
+        local _first=""
+        _behind="$(bare_updates_behind)"
+        if [ -n "$_behind" ]; then
+            _first="${_behind%%;*}"
+            echo "Update available: $_first"
+            if [ "$(bare_autoupdate_state)" = "on" ]; then
+                echo "AUTO_UPDATE is on - updating before launch."
+                bare_run_update
+                export BARE_UPDATE_CHECKED=1
+                # The managed block was just rewritten by the installer, so this
+                # shell's bare() is stale until the file is read again.
+                source "$HOME/.bashrc" 2>/dev/null || true
+                bare "$@"
+                return $?
+            fi
+            read -rp "Would you like to update now? [y/N]: " _choice
+            if [[ "$_choice" =~ ^[Yy] ]]; then
+                bare_run_update
+                export BARE_UPDATE_CHECKED=1
+                source "$HOME/.bashrc" 2>/dev/null || true
+                bare "$@"
+                return $?
+            fi
+            echo "Continuing on the current revision."
+        fi
+    fi
 
     local ENGINE_TYPE="sovereign"
     if [ -f "$CONFIG" ]; then
@@ -1981,7 +2165,145 @@ echo -e "${GREEN}═════════════════════
 echo -e "4. ${GREEN}Update:${NC}        bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
 echo -e "5. ${GREEN}Update Pro:${NC}    bare-update-pro (<< opt - Same fast update, sets the pro tier.)"
 echo -e "6. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
+echo -e "7. ${GREEN}Auto-update:${NC}  bare --auto-update on|off (<< opt - when on, updates behind-the-remote clones before launching.)"
+echo -e "8. ${GREEN}tmux:${NC}         re-run the installer with --with-tmux to add persistent sessions and status-bar circles."
 
+
+# --- 11. UPDATE PREFERENCES (opt-in auto-update, node tier) ---
+# Two single-key files rather than one key=value blob: each is written on its own
+# and neither can corrupt the other. Both sit in the config directory the
+# launcher already reads.
+BARE_CFG_DIR="$TARGET_HOME/.bare-ai/config"
+mkdir -p "$BARE_CFG_DIR"
+
+# The tier is a FACT about how this node was installed, so it is refreshed every
+# run - a --pro reinstall must not leave a stale "free" behind for the launcher.
+echo "BARE_TIER=$TIER" > "$BARE_CFG_DIR/tier.env"
+chmod 644 "$BARE_CFG_DIR/tier.env" 2>/dev/null || true
+
+# AUTO_UPDATE is a CHOICE, so it is only written when one was actually made: an
+# explicit flag, or an interactive answer. A plain re-run must not silently flip
+# a node on or off, which is why "ask" outside a terminal writes nothing.
+BARE_AUTOUPDATE_FILE="$BARE_CFG_DIR/auto-update.env"
+_bare_autoupdate_answer="$AUTO_UPDATE_CHOICE"
+if [ "$_bare_autoupdate_answer" = "ask" ] && [ -t 0 ] && [ "$FAST_UPDATE" = false ]; then
+    if [ -f "$BARE_AUTOUPDATE_FILE" ]; then
+        echo "Current AUTO_UPDATE: $(sed -n 's/^AUTO_UPDATE=//p' "$BARE_AUTOUPDATE_FILE" | tail -n 1)"
+    fi
+    echo ""
+    echo -e "${YELLOW}Optional: automatic updates${NC}"
+    echo "  When enabled, typing 'bare' checks origin/main for both repos and, if"
+    echo "  either is behind, updates and rebuilds BEFORE starting the session."
+    echo "  When disabled, 'bare' shows what is available and waits for [y/N]."
+    read -rp "Enable automatic update on launch? [y/N]: " _bare_au_ans
+    case "$_bare_au_ans" in
+        [Yy]*) _bare_autoupdate_answer="yes" ;;
+        *)     _bare_autoupdate_answer="no" ;;
+    esac
+fi
+if [ "$_bare_autoupdate_answer" = "yes" ]; then
+    echo "AUTO_UPDATE=true" > "$BARE_AUTOUPDATE_FILE"
+    chmod 644 "$BARE_AUTOUPDATE_FILE" 2>/dev/null || true
+    echo -e "${GREEN}OK: AUTO_UPDATE on - 'bare' updates before launching.${NC}"
+elif [ "$_bare_autoupdate_answer" = "no" ]; then
+    echo "AUTO_UPDATE=false" > "$BARE_AUTOUPDATE_FILE"
+    chmod 644 "$BARE_AUTOUPDATE_FILE" 2>/dev/null || true
+    echo -e "${GREEN}OK: AUTO_UPDATE off - 'bare' will prompt instead.${NC}"
+fi
+
+# --- 12. OPTIONAL TMUX PROVISIONING ---
+# tmux is recommended, not required. It is what lets an operator SSH back into a
+# LIVE bare session days later instead of losing that context, and it is what
+# carries the agent status circle into the outer terminal tab. It stays opt-in
+# because it needs root, and a fast in-place update must never touch packages.
+TMUX_WANTED="$TMUX_CHOICE"
+if [ "$TMUX_WANTED" = "ask" ]; then
+    if command -v tmux >/dev/null 2>&1; then
+        TMUX_WANTED="already"
+    elif [ "$FAST_UPDATE" = true ]; then
+        TMUX_WANTED="skip-fast"
+    elif [ -t 0 ]; then
+        echo ""
+        echo -e "${YELLOW}Optional: tmux${NC}"
+        echo "  Persistent terminal multiplexing for Bare-AI sessions:"
+        echo "    - SSH back into an ACTIVE bare session without restarting it, so"
+        echo "      multi-day work keeps its context instead of dying with the link."
+        echo "    - Shows the agent status circle in the tmux status bar and the"
+        echo "      outer terminal tab: working, finished, or failed at a glance."
+        echo "    - Lets the completion bell reach your terminal, which is what makes"
+        echo "      the audible status cues work over SSH."
+        read -rp "Install and configure tmux now? [y/N]: " _tmux_ans
+        case "$_tmux_ans" in
+            [Yy]*) TMUX_WANTED="yes" ;;
+            *)     TMUX_WANTED="no" ;;
+        esac
+    else
+        TMUX_WANTED="skip-headless"
+    fi
+fi
+
+case "$TMUX_WANTED" in
+    yes)
+        if ! command -v tmux >/dev/null 2>&1; then
+            # Best effort: a node without root still gets a working agent, just
+            # without tmux, so a failed install must never fail the installer.
+            if command -v apt-get >/dev/null 2>&1; then
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null 2>&1 || true
+            elif command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y -q tmux >/dev/null 2>&1 || true
+            elif command -v yum >/dev/null 2>&1; then
+                sudo yum install -y -q tmux >/dev/null 2>&1 || true
+            fi
+        fi
+        if command -v tmux >/dev/null 2>&1; then
+            echo -e "${GREEN}OK: tmux is installed.${NC}"
+        else
+            echo -e "${YELLOW}WARNING: tmux could not be installed (it needs root). Install it with your package manager and re-run.${NC}"
+        fi
+        ;;
+    already)
+        echo -e "${GREEN}OK: tmux already installed.${NC}"
+        ;;
+    no)
+        echo -e "${YELLOW}tmux skipped. Re-run with --with-tmux to add it later.${NC}"
+        ;;
+    skip-fast|skip-headless)
+        ;;
+esac
+
+# Configuration is applied whenever tmux is PRESENT, not only when this run
+# installed it, so an operator who installs tmux themselves still gets a config
+# that forwards titles and bells.
+if command -v tmux >/dev/null 2>&1; then
+    TMUX_CONF="$TARGET_HOME/.tmux.conf"
+    touch "$TMUX_CONF" 2>/dev/null || true
+    _tmux_added=0
+    # Appended line by line, and only when absent, so an existing ~/.tmux.conf
+    # keeps everything the operator put in it. A whole-file rewrite would destroy
+    # their bindings just to add five settings.
+    while IFS= read -r _tmux_line; do
+        [ -n "$_tmux_line" ] || continue
+        if grep -qxF -- "$_tmux_line" "$TMUX_CONF" 2>/dev/null; then
+            continue
+        fi
+        echo "$_tmux_line" >> "$TMUX_CONF"
+        _tmux_added=$((_tmux_added + 1))
+    done <<'TMUX_CONF_LINES'
+set -g set-titles on
+set -g set-titles-string "#{pane_title}"
+set -g allow-passthrough on
+set -g mouse on
+set -g history-limit 50000
+set -g bell-action any
+TMUX_CONF_LINES
+    if [ "$_tmux_added" -gt 0 ]; then
+        echo -e "${GREEN}OK: ~/.tmux.conf updated (+$_tmux_added setting(s)).${NC}"
+    else
+        echo -e "${GREEN}OK: ~/.tmux.conf already carries the Bare-AI settings.${NC}"
+    fi
+    echo -e "${YELLOW}  Note: set-titles-string uses #{pane_title}, which the agent sets."
+    echo -e "        bell-action any is what lets the status bell reach your terminal.${NC}"
+fi
 
 # --- FINAL GATE: a CLI clone that could not be rebuilt must fail the update ---
 # The launcher executes bundle/bare-ai.js. A clone that pulled new code but could
