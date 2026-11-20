@@ -527,43 +527,145 @@ class Heartbeat:
         return self
 
 
-def terminate_process_group(proc, grace=15.0, kill_wait=5.0):
-    """SIGTERM the whole child process group, then SIGKILL if it lingers.
-
-    The child is spawned with start_new_session=True so its pid is a process
-    group leader; killing the group takes any node grandchildren with it, which
-    a bare proc.terminate() would leave running.
-    """
-    if proc is None:
-        return "no-process"
-    if proc.poll() is not None:
-        return "already-exited"
+def _own_pgid():
+    """This process's own group id, or None when it cannot be read."""
     try:
-        pgid = os.getpgid(proc.pid)
+        return os.getpgid(0)
     except OSError:
-        try:
-            proc.terminate()
-        except OSError:
-            return "gone"
-        return "terminate-fallback"
+        return None
+
+
+def _group_alive(pgid):
     try:
-        os.killpg(pgid, signal.SIGTERM)
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _wait_group_gone(proc, pgid, timeout, interval=0.05):
+    """True once the group is empty, False if it outlives the budget.
+
+    proc.poll() runs on every pass on purpose: it is a non-blocking waitpid, and
+    an UNREAPED ZOMBIE still occupies its process group. Polling killpg alone
+    would keep seeing the dead child and report a successful kill as unkillable.
+    """
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        try:
+            proc.poll()
+        except (OSError, ValueError):
+            pass
+        if not _group_alive(pgid):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+
+
+def _reap(proc):
+    """Wait on the leader so no zombie is left behind. Never raises."""
+    try:
+        proc.wait(timeout=1.0)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        pass
+
+
+def _target_pgid(proc):
+    """The pgid to signal for proc, or None when there is nothing to signal.
+
+    ROW 711: while the leader exists, os.getpgid gives the real group. Once it has
+    been reaped that call raises ProcessLookupError - but the GROUP can still have
+    members, and because the child ran in its own session its pgid is still its
+    old pid. Falling back to proc.pid is therefore correct, not a guess.
+    """
+    try:
+        return os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return proc.pid
+    except OSError:
+        return None
+
+
+def _terminate_single(proc, grace, kill_wait):
+    """Fallback for a child that shares OUR group: pid only, never killpg."""
+    try:
+        proc.terminate()
     except OSError:
         return "gone"
     try:
         proc.wait(timeout=grace)
-        return "sigterm"
+        return "terminate"
     except subprocess.TimeoutExpired:
         pass
     try:
-        os.killpg(pgid, signal.SIGKILL)
+        proc.kill()
     except OSError:
         return "gone"
     try:
         proc.wait(timeout=kill_wait)
     except subprocess.TimeoutExpired:
         return "unkillable"
-    return "sigkill"
+    return "kill"
+
+
+def terminate_process_group(proc, grace=2.0, kill_wait=5.0):
+    """SIGTERM the child's whole process group, then SIGKILL if it lingers.
+
+    The child is spawned with start_new_session=True so its pid is a process
+    group leader and the group kill takes its own children with it.
+
+    ROW 711 - A GROUP CAN OUTLIVE ITS LEADER. The CLI spawns the work it waits on
+    and can exit (or be reaped during the drain) while grandchildren still live in
+    its group. Treating "the leader has exited" as "nothing left to kill" is
+    exactly how a sleep 600 survived a claim-loss kill, so the group is resolved
+    and signalled even when proc.poll() is not None.
+
+    The target is never OUR OWN process group: killpg on that would take the
+    runner and every sibling job with it, so a child that shares our group is
+    signalled by pid only.
+    """
+    if proc is None:
+        return "no-process"
+
+    pgid = _target_pgid(proc)
+    if pgid is None:
+        return "gone"
+
+    own = _own_pgid()
+    if own is not None and pgid == own:
+        return _terminate_single(proc, grace, kill_wait)
+
+    if not _group_alive(pgid):
+        _reap(proc)
+        return "already-exited"
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except OSError:
+        _reap(proc)
+        return "gone"
+
+    if _wait_group_gone(proc, pgid, grace):
+        _reap(proc)
+        return "sigterm"
+
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except OSError:
+        _reap(proc)
+        return "gone"
+
+    if _wait_group_gone(proc, pgid, kill_wait):
+        _reap(proc)
+        return "sigkill"
+
+    _reap(proc)
+    return "unkillable"
 
 
 def enforce_allowed_paths(changed_paths, allowed_paths, protected_markers=PROTECTED_PATH_MARKERS):
@@ -698,6 +800,14 @@ def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=N
                 result = {"exit_code": -1, "stdout": "", "stderr": str(exc)}
 
             passes_done = pass_no
+            # ROW 711: the claim died WHILE this pass was running, so the child was
+            # killed mid-stream by the drain watch. Stop here: recording the pass
+            # and continuing could still reach outcome "verified" - a completion
+            # outcome for a run whose ownership is gone.
+            if heartbeat is not None and heartbeat.lost_reason:
+                outcome = "lost"
+                outcome_reason = "heartbeat lost mid-pass: " + heartbeat.lost_reason
+                break
             exit_code = int(result.get("exit_code", -1))
             stdout = result.get("stdout") or ""
             response = ""
@@ -749,7 +859,8 @@ def run_supervised_loop(row_id, task_text, state_path, run_cli, heartbeat_call=N
                 outcome_reason = state["blocked_reason"]
                 break
 
-            if StateFile.all_criteria_evidenced(state):
+            claim_still_ours = not (heartbeat is not None and heartbeat.lost_reason)
+            if StateFile.all_criteria_evidenced(state) and claim_still_ours:
                 outcome = "verified"
                 outcome_reason = "all criteria evidenced"
                 break

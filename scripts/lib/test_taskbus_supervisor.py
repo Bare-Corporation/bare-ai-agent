@@ -9,6 +9,7 @@ allowed_paths.
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,51 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import taskbus_supervisor as sup
+
+
+def group_alive(pgid):
+    """True while any process is still in process group pgid."""
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def group_members(pgid):
+    """PIDs whose process group is pgid, read from /proc. Empty on any problem."""
+    found = []
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return found
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open("/proc/" + name + "/stat", "r") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        try:
+            fields = data.rsplit(")", 1)[1].split()
+            pgrp = int(fields[2])
+        except (IndexError, ValueError):
+            continue
+        if pgrp == pgid:
+            found.append(int(name))
+    return found
+
+
+def wait_for_no_members(pgid, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not group_members(pgid):
+            return True
+        time.sleep(0.05)
+    return False
 
 
 class ParseCliJsonTests(unittest.TestCase):
@@ -386,6 +432,102 @@ class TerminateProcessGroupTests(unittest.TestCase):
     def test_none_process_reported(self):
         self.assertEqual(sup.terminate_process_group(None), "no-process")
 
+    def test_kills_a_group_whose_leader_already_exited(self):
+        # ROW 711: the leader exits first and its group lives on. The old code
+        # returned "already-exited" on proc.poll() and never signalled the group,
+        # which is how a sleep survived a claim-loss kill.
+        code = ("import os, sys, time" + chr(10) +
+                "pid = os.fork()" + chr(10) +
+                "if pid == 0:" + chr(10) +
+                "    time.sleep(120)" + chr(10) +
+                "    os._exit(0)" + chr(10) +
+                "sys.exit(0)" + chr(10))
+        proc = subprocess.Popen([sys.executable, "-u", "-c", code],
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        pgid = os.getpgid(proc.pid)
+        try:
+            deadline = time.time() + 10
+            while proc.poll() is None and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertIsNotNone(proc.poll(), "the leader should have exited")
+            self.assertTrue(group_alive(pgid), "the group should still be alive")
+
+            outcome = sup.terminate_process_group(proc, grace=2.0, kill_wait=2.0)
+            self.assertIn(outcome, ("sigterm", "sigkill"))
+            self.assertTrue(wait_for_no_members(pgid),
+                            "the group must be empty after the kill")
+        finally:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def test_a_lost_claim_kills_the_child_and_its_grandchild(self):
+        # End to end for the row-710 shape: a 409 arrives mid-drain, the watch
+        # stops the drain, and the kill must take the whole group - the leader AND
+        # the grandchild it forked - not just the leader's pid.
+        code = ("import os, sys, time" + chr(10) +
+                "pid = os.fork()" + chr(10) +
+                "if pid == 0:" + chr(10) +
+                "    time.sleep(120)" + chr(10) +
+                "    os._exit(0)" + chr(10) +
+                "time.sleep(120)" + chr(10))
+        proc = subprocess.Popen([sys.executable, "-u", "-c", code],
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                start_new_session=True)
+        pgid = os.getpgid(proc.pid)
+        lost = []
+
+        def refuse():
+            raise sup.HeartbeatLost("heartbeat HTTP 409 stale nonce", status=409)
+
+        hb = sup.Heartbeat(0.02, refuse, max_failures=5,
+                           on_lost=lambda reason: lost.append(reason)).start()
+        try:
+            sup.drain_streams(proc, watch=lambda: bool(lost), poll_interval=0.02)
+            hb.stop()
+            self.assertEqual(len(lost), 1, "the 409 should have fired once")
+            self.assertIn("409", lost[0])
+            self.assertTrue(group_alive(pgid),
+                            "the child group should still be running before the kill")
+
+            outcome = sup.terminate_process_group(proc, grace=2.0, kill_wait=2.0)
+            self.assertIn(outcome, ("sigterm", "sigkill"))
+            self.assertTrue(wait_for_no_members(pgid),
+                            "neither the child nor the grandchild may survive")
+            self.assertIsNotNone(proc.wait(timeout=5), "the leader must be reaped")
+        finally:
+            hb.stop()
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def test_a_child_in_our_own_group_is_never_killed_by_group(self):
+        # If the child shares OUR process group, killpg would take the runner and
+        # every sibling job with it. The helper must fall back to pid-only.
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(0.1)
+            self.assertEqual(os.getpgid(proc.pid), os.getpgid(0),
+                             "precondition: the child shares our group")
+            outcome = sup.terminate_process_group(proc, grace=1.0, kill_wait=2.0)
+            self.assertIn(outcome, ("terminate", "kill"))
+            self.assertIsNotNone(proc.wait(timeout=5))
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        # Getting here at all proves the runner itself was not signalled.
+
 
 class AllowedPathTests(unittest.TestCase):
     def setUp(self):
@@ -632,6 +774,56 @@ class SupervisedLoopTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "verified")
         self.assertEqual(result["passes"], 1)
         self.assertTrue(sup.StateFile.all_criteria_evidenced(result["state"]))
+
+    def _run_with_a_mid_pass_loss(self, evidence, max_passes=3):
+        """Drive one pass that outlives the 409, so the loss lands MID-pass.
+
+        run_cli waits for the loss instead of racing it, which is what makes the
+        assertion deterministic: the loss is guaranteed to happen inside pass 1.
+        """
+        lost = []
+        passes = []
+
+        def run_cli(prompt, pass_no):
+            passes.append(pass_no)
+            deadline = time.time() + 3.0
+            while time.time() < deadline and not lost:
+                time.sleep(0.01)
+            return {
+                "exit_code": 0,
+                "stdout": json.dumps({"session_id": "sid", "response": "partial"}),
+                "stderr": "",
+                "evidence": evidence,
+            }
+
+        def refuse():
+            raise sup.HeartbeatLost("heartbeat HTTP 409 stale nonce", status=409)
+
+        result = sup.run_supervised_loop(
+            7, "task", self.state_path, run_cli=run_cli,
+            heartbeat_call=refuse, heartbeat_interval=0.01,
+            on_lost=lambda reason: lost.append(reason),
+            criteria=["build"], max_passes=max_passes, log=self.logs.append)
+        return result, passes, lost
+
+    def test_a_mid_pass_loss_ends_the_run_as_lost(self):
+        # ROW 711: the claim dies WHILE pass 1 runs. The run must stop as "lost" -
+        # not proceed to another pass, and not report a completion.
+        result, passes, lost = self._run_with_a_mid_pass_loss(evidence=[])
+        self.assertEqual(result["outcome"], "lost")
+        self.assertEqual(passes, [1], "no further pass may run after the loss")
+        self.assertEqual(len(lost), 1)
+        self.assertIn("lost", result["reason"])
+
+    def test_a_mid_pass_loss_never_reports_verified(self):
+        # Even with every criterion evidenced, a run whose claim died mid-pass must
+        # not claim success: that is a completion outcome for work we no longer own.
+        result, passes, lost = self._run_with_a_mid_pass_loss(
+            evidence=[{"criterion": "build", "evidence": "green"}])
+        self.assertEqual(result["outcome"], "lost")
+        self.assertNotEqual(result["outcome"], "verified")
+        self.assertEqual(passes, [1])
+        self.assertEqual(len(lost), 1)
 
     def test_second_pass_completes_remaining_criteria(self):
         evidence = {2: [{"criterion": "docs", "evidence": "README updated"}]}

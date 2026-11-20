@@ -162,7 +162,7 @@ if [ "$#" -eq 0 ]; then
 else
   # fd 0 pinned to /dev/null: a detached job must not depend on the fd table it
   # inherited from ssh/setsid, and a CLI probing stdin must see EOF, not EBADF.
-  "$@" < /dev/null 2>&1 | sed -E "${SCRUB_SED[@]}" >> "${LOG_PATH}"
+  "$@" < /dev/null 2>&1 | sed -E -u "${SCRUB_SED[@]}" >> "${LOG_PATH}"
   EXIT_CODE=${PIPESTATUS[0]}
 fi
 
