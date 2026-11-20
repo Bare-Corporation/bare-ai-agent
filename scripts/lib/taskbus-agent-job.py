@@ -48,6 +48,52 @@ DEFAULT_SHORTCUT = os.environ.get("TASKBUS_MODEL_SHORTCUT", "303")
 FALLBACK_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
 FALLBACK_MODEL = "deepseek-v4-flash"
 
+# ── PROVIDER -> CREDENTIAL PATH (row 720/722, 2026-11-20) ────────────────────
+# A model credential is only valid for the provider that issued it. Sending the
+# node's DeepSeek key to Google's endpoint produced
+#   400 INVALID_ARGUMENT "Please pass a valid API key"
+# on every pass. The route therefore decides WHICH secret path is read.
+#
+# Measured on this node on 2026-11-20 (status codes only, no values):
+#   secret/data/deepseek/config  200      secret/data/anthropic/config  403
+#   secret/data/gemini/config    200      secret/data/google/config     403
+#   secret/data/openai/config    200      (google is NOT the Gemini path here)
+# A provider absent from this map has no credential on this node; a route to it is
+# refused rather than signed with someone else's key.
+PROVIDER_SECRET_PATHS = {
+    "deepseek": "secret/data/deepseek/config",
+    "gemini": "secret/data/gemini/config",
+    "openai": "secret/data/openai/config",
+    "anthropic": "secret/data/anthropic/config",
+}
+
+
+def provider_of_endpoint(url):
+    """Which provider issues keys for this endpoint URL.
+
+    Host-based, on purpose: model names carry a provider suffix that does not always
+    agree with the base_url the catalogue returns, and it is the URL the client POSTs
+    to that decides which key is accepted.
+    """
+    u = (url or "").strip().lower()
+    if not u:
+        return ""
+    if "googleapis.com" in u or "generativelanguage" in u:
+        return "gemini"
+    if "deepseek.com" in u:
+        return "deepseek"
+    if "anthropic.com" in u:
+        return "anthropic"
+    if "openai.com" in u or "azure.com" in u:
+        return "openai"
+    if "moonshot" in u:
+        return "moonshot"
+    if "mistral" in u:
+        return "mistral"
+    if "localhost" in u or "127.0.0.1" in u or "ollama" in u:
+        return "ollama"
+    return ""
+
 # Sent as the User-Agent on every criterion check (TICKET 307). A default
 # python-urllib UA is rejected at the edge with 403, which is indistinguishable
 # from a real API 403 and made every http_status check fail.
@@ -353,7 +399,7 @@ def load_env(path):
     return env
 
 
-def vault_api_key():
+def vault_api_key(secret_path=None):
     """Vault-first credential fetch. Each node has its own vault.env with the rotated
     AppRole secret_id, so a dispatched job can authenticate without the dispatcher sending secrets
     over the wire. Without this the target had no model credential at all and every
@@ -403,10 +449,17 @@ def vault_api_key():
     try:
         # Per-node credential path from an auditable file (path only, no secret). The constant is
         # the fallback so the default dispatcher, which the constant belongs to, behaves exactly as before.
-        _p = ""
+        # An explicit path (the route's provider) wins over the node default. Without
+        # this, every job read the one path in model-credential.path no matter which
+        # provider the endpoint belonged to.
+        _p = (secret_path or "").strip()
         try:
-            with open(os.path.join(HOME, ".bare-ai", "config", "model-credential.path")) as _fh:
-                for _ln in _fh:
+            _fh = None if _p else open(
+                os.path.join(HOME, ".bare-ai", "config", "model-credential.path"))
+            if _fh is None:
+                raise OSError("explicit provider path supplied")
+            with _fh as _f:
+                for _ln in _f:
                     _ln = _ln.strip()
                     if _ln and not _ln.startswith("#"):
                         _p = _ln
@@ -1323,13 +1376,21 @@ def main():
         print("target-job: credential source = node profile/model-credentials.env")
 
     # 2. Vault key is a FILL-IN only; it never overrides a profile credential.
+    #    The path is chosen by the PROVIDER THE ROUTE RESOLVED TO, not by the single
+    #    node default: a Gemini endpoint needs a Google key even when the node's
+    #    model-credential.path points at DeepSeek.
     if not env.get("BARE_AI_API_KEY"):
-        vkey, vsrc = vault_api_key()
+        _route_provider = provider_of_endpoint(env.get("BARE_AI_ENDPOINT"))
+        _route_path = PROVIDER_SECRET_PATHS.get(_route_provider)
+        vkey, vsrc = vault_api_key(_route_path)
         if vkey:
             env["BARE_AI_API_KEY"] = vkey
-            print("target-job: credential source = Vault (%s)" % vsrc)
+            env["BARE_AI_CREDENTIAL_PROVIDER"] = _route_provider
+            print("target-job: credential source = Vault (%s) for provider=%s"
+                  % (vsrc, _route_provider or "unknown"))
         else:
-            print("target-job: no profile credential; vault says (%s)" % vsrc)
+            print("target-job: no profile credential; vault says (%s) for provider=%s path=%s"
+                  % (vsrc, _route_provider or "unknown", _route_path or "node default"))
 
     # 3. fail closed, unchanged in spirit: no credential from either source means no attempt.
     if not env.get("BARE_AI_API_KEY"):
@@ -1358,6 +1419,24 @@ def main():
     print("target-job: route in effect = %s model=%s endpoint=%s"
           % ("execution_profile" if _profile_route else "catalogue/node profile",
              env.get("BARE_AI_MODEL"), env.get("BARE_AI_ENDPOINT")))
+
+    # 4b. HARD PROVIDER/CREDENTIAL CONSISTENCY GATE (row 720/722).
+    # The old code printed "confirm the credential matches" and then sent the request
+    # anyway. A warning is not a control. If we know which provider issued the key and
+    # it is not the provider that owns the endpoint, refuse the pass: the attempt is
+    # not consumed and the row is retried with a correct credential instead of being
+    # burned on a 400 the provider can never accept.
+    _ep_provider = provider_of_endpoint(env.get("BARE_AI_ENDPOINT"))
+    _key_provider = (env.get("BARE_AI_CREDENTIAL_PROVIDER") or "").strip()
+    if _ep_provider and _key_provider and _ep_provider != _key_provider:
+        print("target-job: TEMPFAIL - credential/endpoint provider mismatch: "
+              "endpoint is %s but the key belongs to %s. Refusing to send a key to "
+              "the wrong provider; task NOT attempted."
+              % (_ep_provider, _key_provider), file=sys.stderr)
+        return 75
+    if _ep_provider and not _key_provider:
+        print("target-job: credential provider unknown for endpoint provider=%s; "
+              "proceeding (the provider will reject a wrong key)" % _ep_provider)
     env.pop("NODE_TLS_REJECT_UNAUTHORIZED", None)
     ca = os.path.join(HOME, ".bare-ai", "ca", "vault-ca.crt")
     if os.path.exists(ca):
