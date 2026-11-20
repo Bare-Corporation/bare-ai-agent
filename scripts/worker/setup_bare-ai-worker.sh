@@ -1010,6 +1010,27 @@ fi
 # rebuilds only when the checked-out commit actually moved, so a no-op update
 # still finishes in seconds.
 
+# True when the launcher artefact is missing or predates the commit it should
+# carry. The launcher runs bundle/bare-ai.js, so a bundle older than HEAD means
+# this node is running code it does not have on disk - the state a failed
+# rebuild leaves behind, and the state that used to be reported as up to date.
+cli_bundle_is_stale() {
+    local dir="$1"
+    local head="$2"
+    local bundle="$dir/bundle/bare-ai.js"
+    if [ ! -f "$bundle" ]; then
+        return 0
+    fi
+    local head_ts bundle_ts
+    head_ts=$(git -C "$dir" show -s --format=%ct "$head" 2>/dev/null || echo "")
+    bundle_ts=$(stat -c %Y "$bundle" 2>/dev/null || echo "")
+    if [ -z "$head_ts" ] || [ -z "$bundle_ts" ]; then
+        # Cannot compare: rebuild rather than claim the artefact is current.
+        return 0
+    fi
+    [ "$bundle_ts" -lt "$head_ts" ]
+}
+
 refresh_cli_clone() {
     local dir="$1"
     local label="$2"
@@ -1041,21 +1062,24 @@ refresh_cli_clone() {
         return 0
     fi
 
-    if [ "$before" = "$after" ]; then
-        echo -e "${GREEN}OK: $label already at ${after:0:9} - nothing to rebuild.${NC}"
+    if [ "$before" != "$after" ]; then
+        echo -e "${GREEN}$label moved ${before:0:9} -> ${after:0:9}. Rebuilding.${NC}"
+    elif cli_bundle_is_stale "$dir" "$after"; then
+        echo -e "${YELLOW}$label is at ${after:0:9} but bundle/bare-ai.js is missing or older than HEAD - rebuilding.${NC}"
+    else
+        echo -e "${GREEN}OK: $label already at ${after:0:9} - bundle is current, nothing to rebuild.${NC}"
         return 0
     fi
-
-    echo -e "${GREEN}$label moved ${before:0:9} -> ${after:0:9}. Rebuilding.${NC}"
 
     if [ ! -f "$dir/package.json" ]; then
         echo -e "${YELLOW}WARNING: $label has no package.json - pulled but not rebuilt.${NC}"
         return 0
     fi
     if ! command -v npm >/dev/null 2>&1; then
-        echo -e "${YELLOW}WARNING: npm not found - $label pulled to ${after:0:9} but NOT rebuilt.${NC}"
-        echo -e "${YELLOW}         The launcher runs the prebuilt bundle, so it still runs the old code.${NC}"
-        return 0
+        # Same class as a failed build: the clone has code the node cannot run.
+        echo -e "${RED}ERROR: npm not found - $label pulled to ${after:0:9} but NOT rebuilt.${NC}"
+        echo -e "${RED}       The launcher runs the prebuilt bundle, so it still runs the old code.${NC}"
+        return 1
     fi
 
     # Same command the full-mode build uses, so fast and full agree on the artefact.
@@ -1957,3 +1981,16 @@ echo -e "${GREEN}═════════════════════
 echo -e "4. ${GREEN}Update:${NC}        bare-update (<< opt - Runs update script to update Bare-AI-Agent.)"
 echo -e "5. ${GREEN}Update Pro:${NC}    bare-update-pro (<< opt - Same fast update, sets the pro tier.)"
 echo -e "6. ${RED}Uninstall:${NC}     bare-uninstall (<< opt - Runs script to purge Bare-AI Agent & CLI.)"
+
+
+# --- FINAL GATE: a CLI clone that could not be rebuilt must fail the update ---
+# The launcher executes bundle/bare-ai.js. A clone that pulled new code but could
+# not rebuild leaves the node running the PREVIOUS build while every earlier step
+# reported success, so exit non-zero and say why.
+if [ "${CLI_REFRESH_FAILED:-0}" -eq 1 ]; then
+    echo ""
+    echo -e "${RED}UPDATE INCOMPLETE: a CLI clone failed to rebuild.${NC}"
+    echo -e "${RED}The launcher still runs the previous bundle/bare-ai.js.${NC}"
+    echo -e "${RED}Fix the build in the clone named above, then update again.${NC}"
+    exit 1
+fi
