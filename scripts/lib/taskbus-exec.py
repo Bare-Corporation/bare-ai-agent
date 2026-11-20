@@ -31,7 +31,19 @@ from datetime import datetime, timezone
 # Was: a shared admin@bare-erp.com table token in ~/.bare-ai/taskbus.env, kept in a
 # plaintext file. Now: bare_baserow reads THIS machine's own credential from Vault and
 # fails closed if it cannot. No fallback to the old shared token exists.
-import bare_baserow as _bare_baserow
+try:
+    import bare_baserow as _bare_baserow
+except ModuleNotFoundError:
+    # Runs as a symlink (workspace path -> this tracked file), so sys.path[0] is the
+    # REAL directory (scripts/lib) and the node's helper is not importable from there.
+    # bare_baserow stays a node-level dependency on purpose: it resolves THIS
+    # machine's Vault path and is shared by other workspace scripts. One copy, named
+    # explicitly, beats a vendored copy that drifts.
+    _HELPER_DIR = os.path.join(os.path.expanduser("~"), "bare-necessities-workspace",
+                               "my-bare-scripts", "bare-python3-scripts")
+    if _HELPER_DIR not in sys.path:
+        sys.path.insert(0, _HELPER_DIR)
+    import bare_baserow as _bare_baserow
 
 HOME = os.path.expanduser("~")
 ENVF = os.path.join(HOME, ".bare-ai", "taskbus.env")
