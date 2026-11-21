@@ -1543,10 +1543,10 @@ bare_updates_behind() {
     printf '%s' "$_summary"
 }
 
-# The update itself. Deliberately NOT routed through the bare-update alias: bash
-# expands an alias when a FUNCTION BODY IS PARSED, so an alias defined further
-# down this file is invisible inside a function defined above it. These are the
-# same commands the aliases run and must be kept in step with them.
+# The update itself, used by the update-check inside bare(). It is deliberately
+# NOT the bare-update function: that one is defined further down this file and
+# also re-sources the shell profile at the end, which must not happen in the
+# middle of a launch. Its pull and install commands must match that function.
 bare_run_update() {
     if [ "$(bare_tier)" = "pro" ]; then
         ( cd "$HOME/bare-ai-agent" && git pull --ff-only && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro )
@@ -1635,6 +1635,39 @@ bare() {
     local ENGINE_TYPE="sovereign"
     if [ -f "$CONFIG" ]; then
         source "$CONFIG"
+    fi
+
+    # --- POSITIONAL MODEL ARGUMENT ---
+    # A model named as the FIRST argument ('bare deepseek-v4-flash --prompt hi')
+    # must be CONSUMED here. sovereign.js is invoked with "$@" AND --model
+    # "$MODEL", so an unconsumed model travelled as a stray positional argument
+    # beside --model and yargs answered with its help text instead of launching.
+    # The shift happens AFTER the update-check block above on purpose: those
+    # paths relaunch with bare "$@", which must still carry the model.
+    # Only a NON-FLAG first argument counts as a model. --auto-update was handled
+    # above, and any other leading flag is left alone so a flags-first invocation
+    # keeps its previous behaviour.
+    if [ -n "$MODEL" ] && [ "${MODEL#-}" = "$MODEL" ] && [ "$MODEL" = "${1:-}" ]; then
+        shift
+        # Reset first: these two are also set by the menu branch below and would
+        # otherwise leak from an earlier pick in the same shell.
+        _tool_cap=""
+        _is_cloud=""
+        # Resolve catalogue metadata for a directly-named model. Best effort: an
+        # absent catalogue, or one that does not list this model, leaves the
+        # defaults (unknown is treated as cloud, tools on) instead of blocking.
+        if ! command -v catalog_resolve >/dev/null 2>&1; then
+            if [ -f "$HOME/.bare-ai/lib/catalog.sh" ]; then
+                source "$HOME/.bare-ai/lib/catalog.sh"
+            fi
+        fi
+        if command -v catalog_resolve >/dev/null 2>&1; then
+            _direct="$(catalog_resolve "$MODEL" 2>/dev/null)" || _direct=""
+            if [ -n "$_direct" ]; then
+                _tool_cap="$(printf '%s' "$_direct" | awk -F'|' '{print $(NF-1)}')"
+                _is_cloud="$(printf '%s' "$_direct" | awk -F'|' '{print $NF}')"
+            fi
+        fi
     fi
 
     # --- INTERACTIVE MODEL MENU ---
@@ -1808,9 +1841,9 @@ bare() {
         # cloud models begin with a local engine's name (deepseek-v4-flash,
         # qwen3.8-max, ...), and the prefix test made them probe a local ollama
         # that is not running and then HARD-ABORT a launch that never needed it.
-        # Only genuinely local models are probed here. The default is cloud, so
+        # Only genuinely local models are probed here. Unset or empty means cloud, so
         # an absent/unknown flag can never block a cloud launch.
-        if [ "${_is_cloud:-true}" != "true" ]; then
+        if [ -n "${_is_cloud:-}" ] && [ "$_is_cloud" != "true" ]; then
             if command -v ollama &>/dev/null; then
                 # Probe 'ollama list' SEPARATELY from the model match. Piping it
                 # straight into grep hides a failed probe behind grep's exit
@@ -1863,6 +1896,9 @@ bare() {
         # immediately below; the auto-stash safety net in
         # setup_bare-ai-worker.sh catches any leftovers if a session ever
         # exits abnormally before that cleanup runs.
+        # The positional arguments now carry only the flags the caller passed:
+        # a model named first was consumed and shifted out of them above, so it
+        # reaches the engine exactly once, through --model.
         cd "$BARE_CLONE" && node sovereign.js "$@" --model "$MODEL"
 
         # Log forwarding
@@ -1888,8 +1924,21 @@ alias bare-env='${EDITOR:-nano} '"$HOME"'/.bare-ai/bare-environment.md'
 
 alias bare-constitution='cat '"$HOME"'/.bare-ai/technical-constitution.md'
 alias bare-uninstall=''"$HOME"'/bare-ai-agent/scripts/worker/uninstall_bare-ai.sh'
-alias bare-update='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast && source ~/.bashrc'
-alias bare-update-pro='cd '"$HOME"'/bare-ai-agent && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro && source ~/.bashrc'
+# [UPDATE-FLAGS-20261121] bare-update and bare-update-pro are FUNCTIONS, not
+# aliases, because an alias CANNOT forward its arguments: bash substitutes the
+# alias text and appends whatever you typed AFTER it, so 'bare-update --with-tmux'
+# put the flag after 'source ~/.bashrc' and the installer never saw it. A function
+# forwards "$@" properly. The unalias below neutralises an OLDER alias of the same
+# name that may still sit elsewhere in this file: an alias is expanded when a
+# command line is READ, so a surviving one would shadow the function regardless of
+# which of the two is defined last.
+unalias bare-update bare-update-pro 2>/dev/null || true
+bare-update() {
+    cd "$HOME/bare-ai-agent" && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast "$@" && source ~/.bashrc
+}
+bare-update-pro() {
+    cd "$HOME/bare-ai-agent" && git pull && ./scripts/worker/setup_bare-ai-worker.sh --fast --pro "$@" && source ~/.bashrc
+}
 
 # END: BARE-AI-AGENT WORKER BASHRC MODIFICATIONS:
 BARE_FUNC_EOF
@@ -1988,8 +2037,8 @@ bare_assert_single "bare-work()" "bare-work()"
 bare_assert_single "alias bare-env" "alias bare-env="
 bare_assert_single "alias bare-constitution" "alias bare-constitution="
 bare_assert_single "alias bare-uninstall" "alias bare-uninstall="
-bare_assert_single "alias bare-update" "alias bare-update="
-bare_assert_single "alias bare-update-pro" "alias bare-update-pro="
+bare_assert_single "bare-update()" "bare-update()"
+bare_assert_single "bare-update-pro()" "bare-update-pro()"
 
 if [ "$BARE_ASSERT_FAILED" -ne 0 ]; then
     echo -e "${RED}FATAL: duplicate BARE-AI definitions remain in $BASHRC_FILE.${NC}" >&2
