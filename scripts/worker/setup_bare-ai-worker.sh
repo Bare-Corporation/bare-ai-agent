@@ -2211,6 +2211,92 @@ elif [ "$_bare_autoupdate_answer" = "no" ]; then
     echo -e "${GREEN}OK: AUTO_UPDATE off - 'bare' will prompt instead.${NC}"
 fi
 
+# Provision tmux. Returns 0 when tmux is present afterwards, and prints a
+# REASON on stderr when it is not.
+#
+# WHY A FUNCTION WITH A REAL RETURN CODE: the previous inline version ran sudo,
+# then discarded stdout, stderr AND the exit status behind a trailing true, and
+# reported every failure as "it needs root". That message is wrong most of the
+# time - on a clean node apt has no package lists, so apt-get install cannot
+# even locate tmux whatever privileges it holds - and a misleading reason sends
+# the operator to fix the wrong thing. The cause is now captured and printed.
+#
+# Privilege escalation follows the rule the rest of this installer relies on: use
+# the package manager directly when we are root, otherwise sudo when it can
+# actually run (credentials already cached, or a terminal to prompt on).
+# Anything else fails with the reason instead of blocking on a password prompt
+# that nothing can answer.
+provision_tmux() {
+    command -v tmux >/dev/null 2>&1 && return 0
+
+    local _pm=""
+    if command -v apt-get >/dev/null 2>&1; then
+        _pm="apt-get"
+    elif command -v dnf >/dev/null 2>&1; then
+        _pm="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        _pm="yum"
+    elif command -v pacman >/dev/null 2>&1; then
+        _pm="pacman"
+    else
+        echo "no supported package manager found (looked for apt-get, dnf, yum, pacman)"
+        return 1
+    fi
+
+    local _priv=""
+    if [ "$(id -u)" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo "not running as root, and sudo is not installed for $_pm to use"
+            return 1
+        fi
+        # -n succeeds only when credentials are already cached; failing that,
+        # sudo needs a terminal to prompt on. Without either, running it would
+        # block forever or fail opaquely, so name the reason instead.
+        if sudo -n true 2>/dev/null || [ -t 0 ]; then
+            _priv="sudo"
+        else
+            echo "not running as root, and sudo needs a password that no terminal can supply"
+            return 1
+        fi
+    fi
+
+    local _log="/tmp/bare-tmux-install.$$.log"
+    local _rc=0
+
+    case "$_pm" in
+        apt-get)
+            # Update FIRST. A clean node has no package lists, so install fails
+            # with "Unable to locate package tmux" - not a privilege problem,
+            # and it used to be reported as though it were.
+            $_priv env DEBIAN_FRONTEND=noninteractive apt-get update -qq >"$_log" 2>&1
+            $_priv env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >>"$_log" 2>&1
+            _rc=$?
+            ;;
+        dnf)
+            $_priv dnf install -y -q tmux >"$_log" 2>&1
+            _rc=$?
+            ;;
+        yum)
+            $_priv yum install -y -q tmux >"$_log" 2>&1
+            _rc=$?
+            ;;
+        pacman)
+            $_priv pacman -Sy --noconfirm --needed tmux >"$_log" 2>&1
+            _rc=$?
+            ;;
+    esac
+
+    if command -v tmux >/dev/null 2>&1; then
+        rm -f "$_log"
+        return 0
+    fi
+
+    echo "$_pm failed (exit $_rc); last lines of output:"
+    tail -3 "$_log" 2>/dev/null | sed "s/^/  /"
+    rm -f "$_log"
+    return 1
+}
+
 # --- 12. OPTIONAL TMUX PROVISIONING ---
 # tmux is recommended, not required. It is what lets an operator SSH back into a
 # LIVE bare session days later instead of losing that context, and it is what
@@ -2244,22 +2330,18 @@ fi
 
 case "$TMUX_WANTED" in
     yes)
-        if ! command -v tmux >/dev/null 2>&1; then
-            # Best effort: a node without root still gets a working agent, just
-            # without tmux, so a failed install must never fail the installer.
-            if command -v apt-get >/dev/null 2>&1; then
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null 2>&1 || true
-            elif command -v dnf >/dev/null 2>&1; then
-                sudo dnf install -y -q tmux >/dev/null 2>&1 || true
-            elif command -v yum >/dev/null 2>&1; then
-                sudo yum install -y -q tmux >/dev/null 2>&1 || true
-            fi
-        fi
-        if command -v tmux >/dev/null 2>&1; then
+        # Best effort still: a node whose sudo cannot run keeps a working agent,
+        # just without tmux, so a failed install must never fail the installer.
+        # It must, however, say WHY it failed instead of always blaming root.
+        _tmux_reason_log="/tmp/bare-tmux-reason.$$.log"
+        if provision_tmux 2>"$_tmux_reason_log"; then
             echo -e "${GREEN}OK: tmux is installed.${NC}"
         else
-            echo -e "${YELLOW}WARNING: tmux could not be installed (it needs root). Install it with your package manager and re-run.${NC}"
+            echo -e "${YELLOW}WARNING: tmux could not be installed.${NC}"
+            sed "s/^/         /" "$_tmux_reason_log" 2>/dev/null
+            echo -e "${YELLOW}         Re-run with --with-tmux once that is resolved, or install tmux yourself.${NC}"
         fi
+        rm -f "$_tmux_reason_log"
         ;;
     already)
         echo -e "${GREEN}OK: tmux already installed.${NC}"
